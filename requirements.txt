@@ -1,7 +1,3 @@
-requests>=2.31,<3
-PyMuPDF>=1.24,<2
-Pillow>=10,<13
-pytesseract>=0.3.10,<1
-pytest>=8,<10
-pdfplumber>=0.10,<1
-matplotlib>=3.6,<4
+# Las dependencias viven en pyproject.toml. Este archivo instala el paquete en modo
+# editable con las herramientas de desarrollo: python -m pip install -r requirements.txt
+-e .[dev]

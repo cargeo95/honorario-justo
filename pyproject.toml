@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "honorario-justo"
+version = "0.1.0"
+description = "Observatorio de mínima cuantía en SECOP II: cuánto paga el Estado colombiano por el trabajo profesional que exige."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Carlos Arturo Gómez Jiménez" }]
+dependencies = [
+    "requests>=2.31,<3",
+    "PyMuPDF>=1.24,<2",
+    "Pillow>=10,<13",
+    "pytesseract>=0.3.10,<1",
+    "pdfplumber>=0.10,<1",
+    "matplotlib>=3.6,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.5"]
+
+[project.scripts]
+honorario-justo = "honorario_justo.cli:run"
+
+[project.urls]
+Repository = "https://github.com/cargeo95/honorario-justo"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+honorario_justo = ["fuentes/ocr.cjs"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# E501: el formateador controla el largo; lo que queda son textos y comentarios.
+ignore = ["E501", "E731"]

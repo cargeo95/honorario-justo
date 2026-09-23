@@ -1,46 +1,99 @@
 """Extraccion determinista (sin IA) de cargo/experiencia/pago desde el texto y las
-tablas ya cacheadas por evidence.py, con un respaldo de Ollama local solo para lo
+tablas ya cacheadas por fuentes/documentos.py, con un respaldo de Ollama local solo para lo
 que la regla no resuelve. Cada resultado queda marcado con el metodo que lo genero
 y debe pasar filtros de plausibilidad antes de contar como hallazgo.
 
 No descarga nada nuevo: opera sobre data/cases/<hash>/documents y /text ya existentes.
 """
+
 import hashlib
 import json
-import os
 import re
 import urllib.request
-from pathlib import Path
 
 import pdfplumber
 
-from evidence import ROLE
-from secop import normal
-
-ROOT = Path(__file__).resolve().parent
+from honorario_justo import config
+from honorario_justo.dominio.texto import ROLE, normal
 
 EXPERIENCE = re.compile(r'\((\d{1,2})\)\s*(anos|ano|meses|mes)\b')
 # "diez (10) anos" o "minimo 3 anos": el numero entre parentesis es el que manda.
 YEARS_ANY = re.compile(r'(?:\((\d{1,2})\)|\b(\d{1,2}))\s*anos?\b')
-# Cargo completo: la palabra de rol (ROLE de evidence.py) mas su especialidad,
+# Cargo completo: la palabra de rol (ROLE de dominio/texto.py) mas su especialidad,
 # p. ej. "ingeniero residente de interventoria" o "especialista en geotecnia".
-ROLE_LABEL = re.compile(r'\b(?:ingeniero\s+)?(?:director|asesor|ingeniero|profesional|especialista|coordinador|'
-                        r'residente|consultor|topografo|geotecnista|disenador|arquitecto)'
-                        r'(?:\s+(?:de|del|en|la|el|y|[a-z]{3,})\b){0,4}')  # \b: "el" no es "el|ectricista"
-ROLE_STOP = {'con', 'que', 'cuya', 'quien', 'debe', 'debera', 'minimo', 'minima', 'experiencia', 'titulo',
-             'anos', 'contados', 'mensual', 'salario', 'valor', 'dedicacion', 'para', 'por', 'sera',
-             'como', 'fecha', 'area', 'areas', 'publicas', 'privadas', 'seleccion', 'acreditar',
-             'contrato', 'contratos', 'general', 'especifica', 'y', 'o', 'cual', 'incluye', 'item'}
+ROLE_LABEL = re.compile(
+    r'\b(?:ingeniero\s+)?(?:director|asesor|ingeniero|profesional|especialista|coordinador|'
+    r'residente|consultor|topografo|geotecnista|disenador|arquitecto)'
+    r'(?:\s+(?:de|del|en|la|el|y|[a-z]{3,})\b){0,4}'
+)  # \b: "el" no es "el|ectricista"
+ROLE_STOP = {
+    'con',
+    'que',
+    'cuya',
+    'quien',
+    'debe',
+    'debera',
+    'minimo',
+    'minima',
+    'experiencia',
+    'titulo',
+    'anos',
+    'contados',
+    'mensual',
+    'salario',
+    'valor',
+    'dedicacion',
+    'para',
+    'por',
+    'sera',
+    'como',
+    'fecha',
+    'area',
+    'areas',
+    'publicas',
+    'privadas',
+    'seleccion',
+    'acreditar',
+    'contrato',
+    'contratos',
+    'general',
+    'especifica',
+    'y',
+    'o',
+    'cual',
+    'incluye',
+    'item',
+}
 # Palabras que no distinguen un perfil de otro al cruzar requisitos con presupuesto.
-GENERIC_TOKENS = {'de', 'del', 'en', 'la', 'el', 'y', 'ingeniero', 'ingeniera', 'profesional', 'civil',
-                  'general', 'especifica', 'con', 'o', 'los', 'las'}
+GENERIC_TOKENS = {
+    'de',
+    'del',
+    'en',
+    'la',
+    'el',
+    'y',
+    'ingeniero',
+    'ingeniera',
+    'profesional',
+    'civil',
+    'general',
+    'especifica',
+    'con',
+    'o',
+    'los',
+    'las',
+}
 
 # SMLV por ano de publicacion. 2026: Decreto 1469/2025, suspendido en febrero (el 0159/2026
 # fijo el mismo valor de forma transitoria) y vuelto a regir cuando el Consejo de Estado
 # revoco la suspension (17-jul-2026). El proceso de nulidad sigue: revisar si hay sentencia.
 SMLV = {2023: 1_160_000, 2024: 1_300_000, 2025: 1_423_500, 2026: 1_750_905}
-SMLV_FUENTE = {2023: 'Decreto 2613/2022', 2024: 'Decreto 2292/2023', 2025: 'Decreto 1572/2024',
-               2026: 'Decreto 1469/2025'}
+SMLV_FUENTE = {
+    2023: 'Decreto 2613/2022',
+    2024: 'Decreto 2292/2023',
+    2025: 'Decreto 1572/2024',
+    2026: 'Decreto 1469/2025',
+}
 # Por encima de esto un "pago mensual" de una persona es sospechoso (filas de tabla
 # pegadas, valor total leido como mensual): no se descarta, pero baja la confianza.
 SMLV_SOSPECHOSO = 15
@@ -50,9 +103,11 @@ MONEY_INLINE = re.compile(r'\$\s*([\d]{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?)')
 # "al mes"/"por mes" (Sutamarchan: "... al mes por $X").
 # "costos directos de personal / personal profesional ... factor multiplicador": formato estandar
 # de interventoria/consultoria con columnas numeradas (Guapota: $2.800.000, 20%, 3 meses, parcial).
-MONTHLY_HINT = re.compile(r'mensual|valor\s*mes|h/mes|costo\s*mes|salario\s*base|v(?:alo)?r\.?\s*unitario'
-                          r'|costos?\s+directos?\s+de\s+personal|personal\s+profesional|factor\s+multiplicador'
-                          r'|\bal\s+mes\b|\bpor\s+mes\b')
+MONTHLY_HINT = re.compile(
+    r'mensual|valor\s*mes|h/mes|costo\s*mes|salario\s*base|v(?:alo)?r\.?\s*unitario'
+    r'|costos?\s+directos?\s+de\s+personal|personal\s+profesional|factor\s+multiplicador'
+    r'|\bal\s+mes\b|\bpor\s+mes\b'
+)
 # Monto que incluye prestaciones ("salario base mas factor prestacional del 72,81% al mes por
 # $7.795.717"): no es el pago base comparable; el documento suele dar despues el valor "sin el factor".
 CON_FACTOR = re.compile(r'(?:mas|con|incluye)\b[^.$]{0,60}factor\s+prestacional')
@@ -96,7 +151,7 @@ def pago_plausible(valor):
 
 
 def case_folder(case_id):
-    data = Path(os.environ.get('SECOP_DATA', ROOT / 'data')).resolve()
+    data = config.DATA
     return data / 'cases' / hashlib.sha256(case_id.encode()).hexdigest()[:24]
 
 
@@ -129,7 +184,7 @@ def cached_pages(case_id, filename):
 
 
 def page_method(case_id, filename, page):
-    """'texto' u 'ocr', segun como evidence.py obtuvo el texto de esa pagina."""
+    """'texto' u 'ocr', segun como fuentes/documentos.py obtuvo el texto de esa pagina."""
     for p in _cached_text(case_id, filename).get('pages', []):
         if p['page'] == page:
             return p.get('method', 'texto')
@@ -174,7 +229,8 @@ REFERENCIA_TARIFA = re.compile(
     r'(tabla\s+(?:oficial\s+)?de\s+(?:precios|tarifas|honorarios)[^\n.;]{0,90}'
     r'|manual\s+de\s+tarifas[^\n.;]{0,90}'
     r'|tarifas?\s+(?:de\s+(?:la\s+)?)?(?:sociedad\s+colombiana\s+de\s+(?:ingenieros|arquitectos)|sci\b)[^\n.;]{0,60}'
-    r'|resolucion\s+(?:no\.?\s*)?\d+[^\n.;]{0,40}(?:precios|tarifas|honorarios)[^\n.;]{0,60})')
+    r'|resolucion\s+(?:no\.?\s*)?\d+[^\n.;]{0,40}(?:precios|tarifas|honorarios)[^\n.;]{0,60})'
+)
 
 
 def referencia_tarifa(case_id):
@@ -343,13 +399,17 @@ def parse_tabla_personal(page):
             pago = parse_money_co(row[col_pago])
             if not pago_plausible(pago):
                 continue
-            hallazgos.append({
-                'cargo': re.sub(r'\s+', ' ', cargo).strip(),
-                'pago_mensual_cop': pago,
-                'dedicacion': (row[col_dedic] or '').strip() if col_dedic is not None and col_dedic < len(row) else '',
-                'duracion': (row[col_dur] or '').strip() if col_dur is not None and col_dur < len(row) else '',
-                'metodo': 'tabla_pdfplumber',
-            })
+            hallazgos.append(
+                {
+                    'cargo': re.sub(r'\s+', ' ', cargo).strip(),
+                    'pago_mensual_cop': pago,
+                    'dedicacion': (row[col_dedic] or '').strip()
+                    if col_dedic is not None and col_dedic < len(row)
+                    else '',
+                    'duracion': (row[col_dur] or '').strip() if col_dur is not None and col_dur < len(row) else '',
+                    'metodo': 'tabla_pdfplumber',
+                }
+            )
     return hallazgos
 
 
@@ -384,12 +444,12 @@ def extract_pay_regex(case_id, filename, page_number):
         # Varias columnas de dinero en la fila (vr. unitario, vr. parcial, total): el pago
         # por persona es la primera; las siguientes son productos de ella.
         for m in montos[:1]:
-            previo = ' '.join(lines[max(0, i - 3):i]) + ' ' + line[:m.start()]
-            previo = previo[previo.rfind('. ') + 1:] if '. ' in previo else previo
+            previo = ' '.join(lines[max(0, i - 3) : i]) + ' ' + line[: m.start()]
+            previo = previo[previo.rfind('. ') + 1 :] if '. ' in previo else previo
             if CON_FACTOR.search(previo) and 'sin el factor' not in previo:
                 continue
             # "total costos de personal $7.910.878": suma de cargos, no el pago de uno.
-            if re.search(r'\b(?:sub)?total\b', line[:m.start()]):
+            if re.search(r'\b(?:sub)?total\b', line[: m.start()]):
                 continue
             # El cargo mas cercano al monto: misma linea primero, luego hacia arriba.
             cercanas = [line] + [lines[j] for d in range(1, radius + 1) for j in (i - d, i + d) if 0 <= j < len(lines)]
@@ -397,12 +457,19 @@ def extract_pay_regex(case_id, filename, page_number):
             # La pista ("valor mes", "personal profesional"...) es del encabezado de la tabla: en
             # filas del medio queda lejos (Guadalupe: electricista y arquitecto a 4-5 lineas).
             # Se busca hasta 12 lineas arriba; el cargo si debe estar pegado al monto.
-            window = '\n'.join(lines[max(0, i - 12):i + radius + 1])
+            window = '\n'.join(lines[max(0, i - 12) : i + radius + 1])
             if cargo and MONTHLY_HINT.search(window):
                 valor = parse_money_co(m.group(1))
                 if pago_plausible(valor):
-                    hallazgos.append({'cargo': cargo, 'pago_mensual_cop': valor,
-                                      'dedicacion': '', 'duracion': '', 'metodo': 'regex_texto'})
+                    hallazgos.append(
+                        {
+                            'cargo': cargo,
+                            'pago_mensual_cop': valor,
+                            'dedicacion': '',
+                            'duracion': '',
+                            'metodo': 'regex_texto',
+                        }
+                    )
     return hallazgos
 
 
@@ -441,11 +508,21 @@ def extract_pay_filas(case_id, filename, page_number):
         valor = parse_money_co(montos[-2] if len(montos) >= 3 else montos[0])
         if not cargo or not pago_plausible(valor):
             continue
-        fin = next((j for j in range(i + 1, min(len(lines), i + 8)) if ROLE.search(lines[j]) or MONEY_BARE.search(lines[j])), i + 8)
+        fin = next(
+            (j for j in range(i + 1, min(len(lines), i + 8)) if ROLE.search(lines[j]) or MONEY_BARE.search(lines[j])),
+            i + 8,
+        )
         anos = YEARS_ANY.search('\n'.join(lines[inicio:fin]))
-        hallazgos.append({'cargo': cargo, 'pago_mensual_cop': valor, 'dedicacion': '', 'duracion': '',
-                          'metodo': 'regex_texto',
-                          'anos_fila': int(anos.group(1) or anos.group(2)) if anos else None})
+        hallazgos.append(
+            {
+                'cargo': cargo,
+                'pago_mensual_cop': valor,
+                'dedicacion': '',
+                'duracion': '',
+                'metodo': 'regex_texto',
+                'anos_fila': int(anos.group(1) or anos.group(2)) if anos else None,
+            }
+        )
     return hallazgos
 
 
@@ -455,9 +532,15 @@ def extract_pay_ollama(case_id, filename, page_number):
     text = page_window(case_id, filename, page_number)
     if not text.strip():
         return []
-    body = json.dumps({'model': OLLAMA_MODEL, 'prompt': OLLAMA_PROMPT % text[:4000],
-                        'stream': False, 'format': 'json',
-                        'options': {'temperature': 0}}).encode('utf-8')
+    body = json.dumps(
+        {
+            'model': OLLAMA_MODEL,
+            'prompt': OLLAMA_PROMPT % text[:4000],
+            'stream': False,
+            'format': 'json',
+            'options': {'temperature': 0},
+        }
+    ).encode('utf-8')
     req = urllib.request.Request(OLLAMA_URL, data=body, headers={'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
@@ -469,8 +552,15 @@ def extract_pay_ollama(case_id, filename, page_number):
     for c in parsed.get('cargos', []):
         cargo, pago = c.get('cargo', ''), c.get('pago_mensual_cop')
         if es_rol_valido(cargo) and pago_plausible(pago):
-            hallazgos.append({'cargo': cargo.strip(), 'pago_mensual_cop': float(pago),
-                              'dedicacion': str(c.get('dedicacion', '')), 'duracion': '', 'metodo': 'ia_ollama'})
+            hallazgos.append(
+                {
+                    'cargo': cargo.strip(),
+                    'pago_mensual_cop': float(pago),
+                    'dedicacion': str(c.get('dedicacion', '')),
+                    'duracion': '',
+                    'metodo': 'ia_ollama',
+                }
+            )
     return hallazgos
 
 
@@ -478,8 +568,10 @@ def extract_pay(case_id, filename, page_number, use_ollama=True):
     """Orden: tabla (mas confiable) -> regex de texto -> Ollama local, solo si las
     anteriores no encontraron nada."""
     method = page_method(case_id, filename, page_number)
-    hallazgos = (extract_pay_table(case_id, filename, page_number)
-                 or extract_pay_filas(case_id, filename, page_number)
-                 or extract_pay_regex(case_id, filename, page_number)
-                 or (extract_pay_ollama(case_id, filename, page_number) if use_ollama else []))
+    hallazgos = (
+        extract_pay_table(case_id, filename, page_number)
+        or extract_pay_filas(case_id, filename, page_number)
+        or extract_pay_regex(case_id, filename, page_number)
+        or (extract_pay_ollama(case_id, filename, page_number) if use_ollama else [])
+    )
     return [dict(h, metodo_pagina=method) for h in hallazgos]

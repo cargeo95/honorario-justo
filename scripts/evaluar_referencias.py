@@ -4,11 +4,11 @@ Re-puntua cada caso desde el cache local (sin descargar ni OCR), extrae sin Olla
 compara pago mensual y anos exigidos contra lo verificado en cada Investigacion.md.
 No guarda hallazgos: solo reporta. Uso: python scripts/evaluar_referencias.py
 """
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import app  # noqa: E402
+import sys
+
+from honorario_justo.almacenamiento import base_datos
+from honorario_justo.servicios import analisis, hallazgos
 
 # (pago mensual base del documento, anos exigidos) por caso, tomados de Resultados/*/Investigacion.md.
 REFERENCIAS = {
@@ -24,18 +24,20 @@ REFERENCIAS = {
     # dado $1.680.000 y $6.300.000 (parcial y total): error de la IA, no de la regla.
     'CO1.REQ.11069057': ('Guapota - interventoria (prueba al azar 22-sep)', [(2_800_000, None), (2_100_000, None)]),
     # Verificado contra "5. OK E.P. DISENO CUBIERTAS.pdf" p15 (no se descargaba: abreviatura E.P.).
-    'CO1.REQ.11048302': ('Guadalupe (Huila) - diseno cubiertas (prueba al azar 22-sep)', [
-        (3_450_000, None), (2_300_000, None), (1_750_000, None), (2_200_000, None), (1_750_000, None)]),
+    'CO1.REQ.11048302': (
+        'Guadalupe (Huila) - diseno cubiertas (prueba al azar 22-sep)',
+        [(3_450_000, None), (2_300_000, None), (1_750_000, None), (2_200_000, None), (1_750_000, None)],
+    ),
 }
 
 
 def evaluar(rescore=True):
-    config = app.settings() | {'cache_only': True}
+    config = analisis.settings() | {'cache_only': True}
     total = encontrados = anos_ok = anos_eval = falsos = 0
     for cid, (nombre, esperados) in REFERENCIAS.items():
         if rescore:
-            app.analyze_case(cid, config)
-        items = app.extraer_caso(app.get_case(cid), use_ollama=False)
+            analisis.analyze_case(cid, config)
+        items = hallazgos.extraer_caso(base_datos.get_case(cid), use_ollama=False)
         print(f'\n{nombre} ({cid})')
         restantes = list(items)
         for pago, anos in esperados:
@@ -49,13 +51,13 @@ def evaluar(rescore=True):
                     anos_eval += 1
                     ok = match['anos_nivel'] == 'cargo' and match['anos_experiencia'] == anos
                     anos_ok += ok
-                    nota = f" anos {match['anos_experiencia']} ({match['anos_nivel']}) {'OK' if ok else f'esperado {anos}'}"
-                print(f"  OK     ${pago:,.0f} -> {match['cargo']} [{match['confianza']}]{nota}")
+                    nota = f' anos {match["anos_experiencia"]} ({match["anos_nivel"]}) {"OK" if ok else f"esperado {anos}"}'
+                print(f'  OK     ${pago:,.0f} -> {match["cargo"]} [{match["confianza"]}]{nota}')
             else:
                 print(f'  FALTA  ${pago:,.0f} (anos {anos})')
         for i in restantes:
             falsos += 1
-            print(f"  EXTRA  ${i['pago_mensual_cop']:,.0f} -> {i['cargo']} [{i['metodo']}, {i['confianza']}]")
+            print(f'  EXTRA  ${i["pago_mensual_cop"]:,.0f} -> {i["cargo"]} [{i["metodo"]}, {i["confianza"]}]')
     print(f'\nPagos encontrados: {encontrados}/{total} ({100 * encontrados / total:.0f}%)')
     print(f'Anos correctos por cargo: {anos_ok}/{anos_eval}')
     print(f'Extras (no estan en la referencia): {falsos}')

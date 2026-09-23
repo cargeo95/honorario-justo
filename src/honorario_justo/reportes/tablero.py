@@ -4,26 +4,33 @@ con lo que hay en 'dias', 'cases' y 'hallazgos'. No consulta SECOP.
 Cada cifra del tablero sale de una fila auditable: la tabla de detalle enlaza al
 proceso en SECOP y al archivo/pagina de donde se extrajo el pago.
 """
+
 import json
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from statistics import median
 
-from app import ROOT, db, indicadores_folder, unpack
-from extraccion import SMLV, SMLV_FUENTE
-from secop import link, normal
+from honorario_justo import config
+from honorario_justo.almacenamiento.base_datos import db, unpack
+from honorario_justo.config import indicadores_folder
+from honorario_justo.dominio.extraccion import SMLV, SMLV_FUENTE
+from honorario_justo.dominio.texto import normal
+from honorario_justo.fuentes.secop import link
 
-GEO = ROOT / 'data' / 'geo' / 'colombia.geo.json'
+GEO = config.ROOT / 'data' / 'geo' / 'colombia.geo.json'
 # Departamentos de Colombia (DANE, 33 poligonos, propiedad NOMBRE_DPT). data/ no se versiona:
 # si falta, se descarga una vez.
-GEO_URL = ('https://gist.githubusercontent.com/john-guerra/43c7656821069d00dcbc/raw/'
-           'be6a6e239cd5b5b803c6e7c2ec405b793a9064dd/Colombia.geo.json')
+GEO_URL = (
+    'https://gist.githubusercontent.com/john-guerra/43c7656821069d00dcbc/raw/'
+    'be6a6e239cd5b5b803c6e7c2ec405b793a9064dd/Colombia.geo.json'
+)
 # Nombres de SECOP que no coinciden con NOMBRE_DPT del GeoJSON (DANE antiguo).
-DPTO_ALIAS = {'distrito capital de bogota': 'santafe de bogota d.c', 'bogota d.c.': 'santafe de bogota d.c',
-              'san andres, providencia y santa catalina': 'archipielago de san andres providencia y santa catalina',
-              'archipielago de san andres, providencia y santa catalina':
-                  'archipielago de san andres providencia y santa catalina'}
+DPTO_ALIAS = {
+    'distrito capital de bogota': 'santafe de bogota d.c',
+    'bogota d.c.': 'santafe de bogota d.c',
+    'san andres, providencia y santa catalina': 'archipielago de san andres providencia y santa catalina',
+    'archipielago de san andres, providencia y santa catalina': 'archipielago de san andres providencia y santa catalina',
+}
 
 
 def clave_dpto(nombre):
@@ -46,6 +53,7 @@ def geo_simplificado():
     if not GEO.exists():
         try:
             import requests
+
             response = requests.get(GEO_URL, timeout=60)
             response.raise_for_status()
             GEO.parent.mkdir(parents=True, exist_ok=True)
@@ -57,9 +65,16 @@ def geo_simplificado():
     for f in data['features']:
         g = f['geometry']
         coords = _simplificar(g['coordinates'])
-        feats.append({'type': 'Feature', 'properties': {'k': clave_dpto(f['properties']['NOMBRE_DPT']),
-                                                        'n': f['properties']['NOMBRE_DPT'].title()},
-                      'geometry': {'type': g['type'], 'coordinates': coords}})
+        feats.append(
+            {
+                'type': 'Feature',
+                'properties': {
+                    'k': clave_dpto(f['properties']['NOMBRE_DPT']),
+                    'n': f['properties']['NOMBRE_DPT'].title(),
+                },
+                'geometry': {'type': g['type'], 'coordinates': coords},
+            }
+        )
     return {'type': 'FeatureCollection', 'features': feats}
 
 
@@ -88,43 +103,74 @@ def datos():
         fechas = [(inicio + timedelta(days=i)).isoformat() for i in range((fin - inicio).days + 1)]
     for f in fechas:
         d = dias.get(f)
-        serie.append({'fecha': f, 'publicados': d['publicados'] if d else None,
-                      'analizados': d['analizados'] if d else por_dia[f]['analizados'],
-                      'en_base': por_dia[f]['en_base'], 'con_hallazgo': len(con_hallazgo[f]),
-                      # Completo = se analizo todo lo publicado (una corrida con --limite no cuenta).
-                      'corte_completo': bool(d) and d['analizados'] >= d['publicados'] > 0})
-    from indicadores import clasificar, cortes_por_franja
+        serie.append(
+            {
+                'fecha': f,
+                'publicados': d['publicados'] if d else None,
+                'analizados': d['analizados'] if d else por_dia[f]['analizados'],
+                'en_base': por_dia[f]['en_base'],
+                'con_hallazgo': len(con_hallazgo[f]),
+                # Completo = se analizo todo lo publicado (una corrida con --limite no cuenta).
+                'corte_completo': bool(d) and d['analizados'] >= d['publicados'] > 0,
+            }
+        )
+    from honorario_justo.reportes.indicadores import clasificar, cortes_por_franja
+
     cortes = cortes_por_franja([h for h in hallazgos if h['estado'] != 'descartado'])
     filas = []
     for h in hallazgos:
         m = meta.get(h['proceso_id'], {})
-        filas.append({'id': h['id'], 'proceso': h['proceso_id'], 'url': link(m.get('urlproceso')),
-                      'entidad': h['entidad'], 'dpto': h['departamento'], 'dpto_k': clave_dpto(h['departamento']),
-                      'fecha': str(h['fecha_publicacion'])[:10], 'cargo': h['cargo'],
-                      'anos': h['anos_experiencia'], 'anos_nivel': h['anos_nivel'],
-                      'pago': h['pago_mensual_cop'], 'smlv': h['pago_smlv'], 'metodo': h['metodo'],
-                      'confianza': h['confianza'] or 'baja', 'estado': h['estado'],
-                      'clase': clasificar(h, cortes), 'tarifa': h.get('referencia_tarifa') or '',
-                      'fuente': f"{h['archivo_fuente']} p. {h['pagina_fuente']}"})
+        filas.append(
+            {
+                'id': h['id'],
+                'proceso': h['proceso_id'],
+                'url': link(m.get('urlproceso')),
+                'entidad': h['entidad'],
+                'dpto': h['departamento'],
+                'dpto_k': clave_dpto(h['departamento']),
+                'fecha': str(h['fecha_publicacion'])[:10],
+                'cargo': h['cargo'],
+                'anos': h['anos_experiencia'],
+                'anos_nivel': h['anos_nivel'],
+                'pago': h['pago_mensual_cop'],
+                'smlv': h['pago_smlv'],
+                'metodo': h['metodo'],
+                'confianza': h['confianza'] or 'baja',
+                'estado': h['estado'],
+                'clase': clasificar(h, cortes),
+                'tarifa': h.get('referencia_tarifa') or '',
+                'fuente': f'{h["archivo_fuente"]} p. {h["pagina_fuente"]}',
+            }
+        )
     procesos_dpto = Counter(clave_dpto(c['metadata'].get('departamento_entidad', '')) for c in cases)
-    return {'serie': serie, 'hallazgos': filas, 'procesos_dpto': procesos_dpto,
-            'total_casos': len(cases), 'analizados': sum(1 for c in cases if c['checked_at']),
-            'smlv': {str(k): {'valor': v, 'fuente': SMLV_FUENTE[k]} for k, v in SMLV.items()},
-            'generado': datetime.now().strftime('%Y-%m-%d %H:%M')}
+    return {
+        'serie': serie,
+        'hallazgos': filas,
+        'procesos_dpto': procesos_dpto,
+        'total_casos': len(cases),
+        'analizados': sum(1 for c in cases if c['checked_at']),
+        'smlv': {str(k): {'valor': v, 'fuente': SMLV_FUENTE[k]} for k, v in SMLV.items()},
+        'generado': datetime.now().strftime('%Y-%m-%d %H:%M'),
+    }
 
 
 def generar_tablero(root=None):
     payload = datos()
     geo = geo_simplificado()
-    html = PLANTILLA.replace('/*__DATOS__*/null', json.dumps(payload, ensure_ascii=False)) \
-                    .replace('/*__GEO__*/null', json.dumps(geo, separators=(',', ':')) if geo else 'null')
+    html = PLANTILLA.replace('/*__DATOS__*/null', json.dumps(payload, ensure_ascii=False)).replace(
+        '/*__GEO__*/null', json.dumps(geo, separators=(',', ':')) if geo else 'null'
+    )
     path = indicadores_folder(root) / 'tablero.html'
     path.write_text(html, encoding='utf-8')
-    return {'archivo': str(path), 'hallazgos': len(payload['hallazgos']), 'dias': len(payload['serie']),
-            'mediana_smlv': median([h['smlv'] for h in payload['hallazgos'] if h['smlv']] or [0])}
+    return {
+        'archivo': str(path),
+        'hallazgos': len(payload['hallazgos']),
+        'dias': len(payload['serie']),
+        'mediana_smlv': median([h['smlv'] for h in payload['hallazgos'] if h['smlv']] or [0]),
+    }
 
 
-PLANTILLA = r'''<!doctype html>
+PLANTILLA = r"""<!doctype html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -373,7 +419,7 @@ function serie() {
   const completo = S.some(d => d.publicados != null);
   document.getElementById('serie-sub').textContent = completo
     ? 'Barra gris: publicados ese día en SECOP (o procesos en la base, en días sin corte diario). Barra azul: procesos con al menos un cargo y pago extraído.'
-    : 'Todavía no hay cortes diarios completos (app.py --dia). Barra gris: procesos en la base, aún filtrados por palabra clave.';
+    : 'Todavía no hay cortes diarios completos (honorario-justo --dia). Barra gris: procesos en la base, aún filtrados por palabra clave.';
   document.getElementById('leg-serie').innerHTML =
     `<span><i style="background:${css('--muted-bar')}"></i>${completo ? 'Publicados' : 'En la base'}</span>` +
     `<span><i style="background:${css('--series-1')}"></i>Con dato usable</span>`;
@@ -456,4 +502,4 @@ document.getElementById('pie').innerHTML =
 </script>
 </body>
 </html>
-'''
+"""

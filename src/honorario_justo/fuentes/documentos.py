@@ -1,4 +1,5 @@
 """Local text extraction and conservative, reviewable evidence suggestions."""
+
 import contextlib
 import hashlib
 import json
@@ -10,9 +11,11 @@ import tempfile
 from pathlib import Path
 
 import fitz
-from secop import normal
 
-ROOT = Path(__file__).resolve().parent
+from honorario_justo import config
+from honorario_justo.dominio.texto import ROLE, normal
+
+OCR_JS = Path(__file__).resolve().parent / 'ocr.cjs'
 
 
 def tesseract_dirs():
@@ -22,6 +25,7 @@ def tesseract_dirs():
     if os.name == 'nt':
         with contextlib.suppress(OSError):
             import winreg
+
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Tesseract-OCR') as key:
                 dirs.append(winreg.QueryValueEx(key, 'InstallDir')[0])
     return [Path(d) for d in dirs if d]
@@ -42,12 +46,22 @@ def find_tesseract():
 
 def ocr_status():
     executable, tessdata = find_tesseract()
-    modules = Path(os.environ.get('SECOP_NODE_MODULES', str(Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules')))
+    modules = Path(
+        os.environ.get(
+            'SECOP_NODE_MODULES',
+            str(Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules'),
+        )
+    )
     js = modules / 'tesseract.js'
-    model = ROOT / 'data/ocr/spa.traineddata.gz'
-    return {'available': bool(executable or (shutil.which('node') and js.exists() and model.exists())),
-            'engine': 'Tesseract' if executable else 'Tesseract.js', 'executable': executable, 'tessdata': tessdata,
-            'modules': str(modules), 'model_ready': model.exists()}
+    model = config.OCR / 'spa.traineddata.gz'
+    return {
+        'available': bool(executable or (shutil.which('node') and js.exists() and model.exists())),
+        'engine': 'Tesseract' if executable else 'Tesseract.js',
+        'executable': executable,
+        'tessdata': tessdata,
+        'modules': str(modules),
+        'model_ready': model.exists(),
+    }
 
 
 def ocr_page(page, directory, number):
@@ -64,14 +78,20 @@ def ocr_page(page, directory, number):
         if status['executable']:
             import pytesseract
             from PIL import Image
+
             pytesseract.pytesseract.tesseract_cmd = status['executable']
             # Por variable y no con --tessdata-dir: pytesseract parte mal rutas con espacios.
             os.environ['TESSDATA_PREFIX'] = status['tessdata']
             with Image.open(path) as image:
                 return pytesseract.image_to_string(image, lang='spa', timeout=90)
-        result = subprocess.run(['node', str(ROOT / 'ocr.cjs'), str(path), status['modules'],
-                                 str(ROOT / 'data/ocr')], capture_output=True, text=True,
-                                encoding='utf-8', timeout=120, creationflags=0x08000000 if os.name == 'nt' else 0)
+        result = subprocess.run(
+            ['node', str(OCR_JS), str(path), status['modules'], str(config.OCR)],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            timeout=120,
+            creationflags=0x08000000 if os.name == 'nt' else 0,
+        )
         if result.returncode:
             raise RuntimeError(result.stderr[-500:])
         return result.stdout
@@ -80,14 +100,15 @@ def ocr_page(page, directory, number):
             path.unlink(missing_ok=True)
 
 
-ROLE = re.compile(r'\b(director|asesor|ingeniero|profesional|especialista|coordinador|residente|consultor|topografo|geotecnista|disenador|arquitecto)\b')
 MONEY = re.compile(r'\$\s*\d|\b\d{1,3}(?:[.,]\d{3}){2,}\b')
 PAY_WORDS = ('salario', 'honorario', 'valor mes', 'mensual', 'dedicacion', 'costo personal', 'costos de personal')
 # Montos de tablas por producto/cotizacion/unidad: el valor es del entregable, no de una persona.
 ITEM_LINE = re.compile(r'cotizacion|promedio|\bproducto\b|\bund\b|\bkm\b|\bevento\b|\bactividad\b')
 # Encabezados de tabla de personal con columnas separadas por mucho espacio ("valor      mes")
 # o rotulos de subtotal (Guadalupe, CO1.REQ.11048302: "subtotal personal profesional").
-PAY_REGEX = re.compile(r'valor\s+mes\b|personal\s+profesional|factor\s+multiplicador|costos?\s+(?:directos?\s+)?de\s+personal')
+PAY_REGEX = re.compile(
+    r'valor\s+mes\b|personal\s+profesional|factor\s+multiplicador|costos?\s+(?:directos?\s+)?de\s+personal'
+)
 # Columna de unidad "mes" seguida de la cantidad: "... mes   1   10.200.000 ...".
 MES_UNIT = re.compile(r'\bmes(?:es)?\s+\d{1,2}\b')
 
@@ -101,12 +122,12 @@ def personnel_pay(t):
     lines = t.splitlines()
     for i, line in enumerate(lines):
         if MONEY.search(line) and not ITEM_LINE.search(line):
-            window = '\n'.join(lines[max(0, i - 3):i + 4])
+            window = '\n'.join(lines[max(0, i - 3) : i + 4])
             if ROLE.search(window) and (any(w in window for w in PAY_WORDS) or PAY_REGEX.search(window)):
                 return True
             # Tabla de cotizaciones con unidad "mes" en la misma fila del monto y el perfil
             # en una celda de varias lineas arriba (Maripi, CO1.REQ.11051829, p. 20).
-            if MES_UNIT.search(line) and ROLE.search('\n'.join(lines[max(0, i - 8):i + 1])):
+            if MES_UNIT.search(line) and ROLE.search('\n'.join(lines[max(0, i - 8) : i + 1])):
                 return True
     return False
 
@@ -114,12 +135,20 @@ def personnel_pay(t):
 def scores(text):
     t = normal(text)
     role = bool(ROLE.search(t))
-    experience = role and bool(re.search(r'\bexperiencia\b', t)) and bool(re.search(r'\b(anos|meses|matricula|tarjeta profesional|titulo)\b', t))
+    experience = (
+        role
+        and bool(re.search(r'\bexperiencia\b', t))
+        and bool(re.search(r'\b(anos|meses|matricula|tarjeta profesional|titulo)\b', t))
+    )
     pay = personnel_pay(t)
-    identity = any(w in t for w in ['municipio', 'alcaldia', 'gobernacion', 'entidad', 'instituto', 'empresa']) and any(w in t for w in ['objeto', 'invitacion', 'contratar', 'contratacion'])
-    return {'objeto': (3 + int('objeto' in t) + int('minima cuantia' in t)) if identity else 0,
-            'experiencia': (4 + int('especifica' in t) + int('equipo' in t)) if experience else 0,
-            'presupuesto': (4 + int('dedicacion' in t) + int('mensual' in t)) if pay else 0}
+    identity = any(w in t for w in ['municipio', 'alcaldia', 'gobernacion', 'entidad', 'instituto', 'empresa']) and any(
+        w in t for w in ['objeto', 'invitacion', 'contratar', 'contratacion']
+    )
+    return {
+        'objeto': (3 + int('objeto' in t) + int('minima cuantia' in t)) if identity else 0,
+        'experiencia': (4 + int('especifica' in t) + int('equipo' in t)) if experience else 0,
+        'presupuesto': (4 + int('dedicacion' in t) + int('mensual' in t)) if pay else 0,
+    }
 
 
 def analyze_pdf(path, folder, config):
@@ -145,7 +174,14 @@ def analyze_pdf(path, folder, config):
             text = page.get_text(sort=True)
             method = 'texto'
             if len(text.strip()) < 100:
-                previous = next((p for p in old.get('pages', []) if p['page'] == i + 1 and p.get('method') == 'ocr' and len(p.get('text', '').strip()) >= 50), None)
+                previous = next(
+                    (
+                        p
+                        for p in old.get('pages', [])
+                        if p['page'] == i + 1 and p.get('method') == 'ocr' and len(p.get('text', '').strip()) >= 50
+                    ),
+                    None,
+                )
                 if previous:
                     text, method = previous['text'], 'ocr'
                 elif ocr_count < config['max_ocr_pages']:
@@ -173,9 +209,14 @@ def render_page(pdf, page, target, crop=None):
             if not isinstance(crop, list) or len(crop) != 4 or not all(isinstance(v, (int, float)) for v in crop):
                 raise ValueError('Recorte invalido')
             x0, y0, x1, y1 = crop
-            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1) or x1 - x0 < .03 or y1 - y0 < .03:
+            if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1) or x1 - x0 < 0.03 or y1 - y0 < 0.03:
                 raise ValueError('Recorte fuera de pagina o demasiado pequeno')
-            rect = fitz.Rect(rect.x0+x0*rect.width,rect.y0+y0*rect.height,rect.x0+x1*rect.width,rect.y0+y1*rect.height)
+            rect = fitz.Rect(
+                rect.x0 + x0 * rect.width,
+                rect.y0 + y0 * rect.height,
+                rect.x0 + x1 * rect.width,
+                rect.y0 + y1 * rect.height,
+            )
         scale = min(2, 3500 / max(rect.width, rect.height))
         source.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=rect, alpha=False).save(target)
 

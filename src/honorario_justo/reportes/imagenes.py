@@ -9,6 +9,7 @@ Formatos:
 Por defecto solo usa cifras confirmadas (--marcar). Con borrador=True incluye las
 'sin_revisar' y estampa "BORRADOR" en cada imagen, para revisar antes de publicar.
 """
+
 import textwrap
 from datetime import date
 from pathlib import Path
@@ -20,17 +21,26 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Polygon  # noqa: E402
 
-from app import MESES, db, indicadores_folder, pesos  # noqa: E402
-from extraccion import SMLV, SMLV_FUENTE  # noqa: E402
+from honorario_justo.almacenamiento.base_datos import db  # noqa: E402
+from honorario_justo.config import indicadores_folder  # noqa: E402
+from honorario_justo.dominio.extraccion import SMLV, SMLV_FUENTE  # noqa: E402
+from honorario_justo.dominio.formato import MESES, pesos  # noqa: E402
 
 FORMATOS = {
     'linkedin': {'w': 1080, 'h': 1350, 'top': 80, 'bottom': 80, 'left': 80, 'right': 80},
     'tiktok': {'w': 1080, 'h': 1920, 'top': 200, 'bottom': 460, 'left': 80, 'right': 170},
 }
 # Paleta clara del tablero (validada con el script de dataviz: slots 1-3 pasan CVD).
-C = {'fondo': '#fcfcfb', 'tinta': '#0b0b0b', 'sec': '#52514e', 'tenue': '#7a7974', 'grid': '#e6e5e0',
-     'serie': '#2a78d6', 'borrador': '#fff4d6',
-     'seq': ['#f0efec', '#cde2fb', '#9ec5f4', '#5598e7', '#256abf', '#104281']}
+C = {
+    'fondo': '#fcfcfb',
+    'tinta': '#0b0b0b',
+    'sec': '#52514e',
+    'tenue': '#7a7974',
+    'grid': '#e6e5e0',
+    'serie': '#2a78d6',
+    'borrador': '#fff4d6',
+    'seq': ['#f0efec', '#cde2fb', '#9ec5f4', '#5598e7', '#256abf', '#104281'],
+}
 DIAS_SEMANA = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
 
 for _f in ('segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf'):
@@ -65,9 +75,17 @@ class Lienzo:
         self.x0, self.x1 = self.f['left'], self.W - self.f['right']
         self.y = self.f['top']  # cursor vertical
         if borrador:
-            self.fig.patches.append(FancyBboxPatch((0, 1 - 56 / self.H), 1, 56 / self.H, boxstyle='square,pad=0',
-                                                   transform=self.fig.transFigure, facecolor=C['borrador'],
-                                                   edgecolor='none'))
+            self.fig.patches.append(
+                FancyBboxPatch(
+                    (0, 1 - 56 / self.H),
+                    1,
+                    56 / self.H,
+                    boxstyle='square,pad=0',
+                    transform=self.fig.transFigure,
+                    facecolor=C['borrador'],
+                    edgecolor='none',
+                )
+            )
             self.texto(self.W / 2, 28, 'BORRADOR · cifras sin revisar', 20, peso='semibold', ha='center', va='center')
 
     def fx(self, px):
@@ -77,8 +95,17 @@ class Lienzo:
         return 1 - py / self.H
 
     def texto(self, x, y, s, size, color=None, peso='normal', ha='left', va='top', **kw):
-        return self.fig.text(self.fx(x), self.fy(y), s, fontsize=size * 0.72, color=color or C['tinta'],
-                             fontweight=peso, ha=ha, va=va, **kw)
+        return self.fig.text(
+            self.fx(x),
+            self.fy(y),
+            s,
+            fontsize=size * 0.72,
+            color=color or C['tinta'],
+            fontweight=peso,
+            ha=ha,
+            va=va,
+            **kw,
+        )
 
     def parrafo(self, s, size, color=None, peso='normal', interlineado=1.3, espacio_despues=0):
         # ~0.5 em de ancho medio por caracter en Segoe UI (0.55 en negrita).
@@ -96,8 +123,15 @@ class Lienzo:
 
     def pie(self, lineas):
         y = self.H - self.f['bottom'] - 22 * len(lineas)
-        self.fig.lines.append(plt.Line2D([self.fx(self.x0), self.fx(self.x1)], [self.fy(y - 18)] * 2,
-                                         transform=self.fig.transFigure, color=C['grid'], lw=1))
+        self.fig.lines.append(
+            plt.Line2D(
+                [self.fx(self.x0), self.fx(self.x1)],
+                [self.fy(y - 18)] * 2,
+                transform=self.fig.transFigure,
+                color=C['grid'],
+                lw=1,
+            )
+        )
         for linea in lineas:
             self.texto(self.x0, y, linea, 18, color=C['tenue'])
             y += 22
@@ -126,10 +160,13 @@ def _cifra(lz, valor, etiqueta, grande=False):
 def _fuente(fecha_ref):
     anio = int(fecha_ref[:4])
     smlv = SMLV.get(anio)
-    return ['Fuente: SECOP II, Datos Abiertos Colombia (p6dx-8zbt) y documentos del proceso.',
-            f'SMLV {anio}: ${pesos(smlv)} ({SMLV_FUENTE.get(anio, "")}). Valores antes de impuestos y factor prestacional.'
-            if smlv else 'SMLV del año de publicación.',
-            'Observatorio de Mínima Cuantía']
+    return [
+        'Fuente: SECOP II, Datos Abiertos Colombia (p6dx-8zbt) y documentos del proceso.',
+        f'SMLV {anio}: ${pesos(smlv)} ({SMLV_FUENTE.get(anio, "")}). Valores antes de impuestos y factor prestacional.'
+        if smlv
+        else 'SMLV del año de publicación.',
+        'Observatorio de Mínima Cuantía',
+    ]
 
 
 def _barras_smlv(lz, hallazgos, alto):
@@ -148,14 +185,31 @@ def _barras_smlv(lz, hallazgos, alto):
     tapa = {'facecolor': C['fondo'], 'edgecolor': 'none', 'pad': 1.5}
     for x in range(0, int(xmax) + 1):
         ax.axvline(x, color=C['grid'], lw=1, zorder=1)
-    for y, h in zip(ys, hs):
-        ax.text(h['pago_smlv'] + xmax * 0.015, y, f"{_smlv(h['pago_smlv'])} SMLV", va='center', fontsize=17,
-                color=C['tinta'], fontweight='semibold', zorder=5, bbox=tapa)
-        anos = f"{h['anos_experiencia']} años exigidos" if h['anos_nivel'] == 'cargo' else 'años sin cruzar'
+    for y, h in zip(ys, hs, strict=True):
+        ax.text(
+            h['pago_smlv'] + xmax * 0.015,
+            y,
+            f'{_smlv(h["pago_smlv"])} SMLV',
+            va='center',
+            fontsize=17,
+            color=C['tinta'],
+            fontweight='semibold',
+            zorder=5,
+            bbox=tapa,
+        )
+        anos = f'{h["anos_experiencia"]} años exigidos' if h['anos_nivel'] == 'cargo' else 'años sin cruzar'
         cargo = textwrap.shorten(h['cargo'].capitalize(), 48, placeholder='…')
         ax.text(0, y + 0.2, cargo, va='bottom', fontsize=17, color=C['tinta'], zorder=5, bbox=tapa)
-        ax.text(0, y - 0.2, f"{anos} · {textwrap.shorten(nombre_propio(h['entidad']), 40, placeholder='…')}",
-                va='top', fontsize=13.5, color=C['sec'], zorder=5, bbox=tapa)
+        ax.text(
+            0,
+            y - 0.2,
+            f'{anos} · {textwrap.shorten(nombre_propio(h["entidad"]), 40, placeholder="…")}',
+            va='top',
+            fontsize=13.5,
+            color=C['sec'],
+            zorder=5,
+            bbox=tapa,
+        )
     ax.set_yticks([])
     ax.tick_params(axis='x', colors=C['tenue'], labelsize=13, length=0)
     for s in ax.spines.values():
@@ -164,7 +218,8 @@ def _barras_smlv(lz, hallazgos, alto):
 
 
 def _mapa(lz, por_dpto, alto):
-    import tablero
+    from honorario_justo.reportes import tablero
+
     geo = tablero.geo_simplificado()
     ax = lz.eje(alto)
     ax.set_axis_off()
@@ -192,26 +247,51 @@ def _mapa(lz, por_dpto, alto):
         ty = 11.8 - i * 1.7
         ax.plot([cx, -66.4], [cy, ty], color=C['sec'], lw=1, zorder=4)
         ax.plot([cx], [cy], 'o', ms=6, color=C['tinta'], mec=C['fondo'], mew=2, zorder=5)
-        ax.text(-66.2, ty + 0.25, nombre, fontsize=17, fontweight='semibold', color=C['tinta'],
-                va='bottom', zorder=5)
-        ax.text(-66.2, ty + 0.2, f"{n} cargo{'s' if n != 1 else ''} · mediana {_smlv(med)} SMLV", fontsize=14,
-                color=C['sec'], va='top', zorder=5)
+        ax.text(-66.2, ty + 0.25, nombre, fontsize=17, fontweight='semibold', color=C['tinta'], va='bottom', zorder=5)
+        ax.text(
+            -66.2,
+            ty + 0.2,
+            f'{n} cargo{"s" if n != 1 else ""} · mediana {_smlv(med)} SMLV',
+            fontsize=14,
+            color=C['sec'],
+            va='top',
+            zorder=5,
+        )
     ax.set_xlim(-79.2, -58.5)  # margen a la derecha para las etiquetas
     ax.set_ylim(-4.3, 12.6)
     ax.set_aspect('equal')
     # Leyenda: rampa de 0 a maximo.
     for i, col in enumerate(C['seq']):
-        ax.add_patch(FancyBboxPatch((0.02 + i * 0.07, 0.03), 0.06, 0.022, boxstyle='round,pad=0,rounding_size=0.004',
-                                    transform=ax.transAxes, facecolor=col, edgecolor='none'))
+        ax.add_patch(
+            FancyBboxPatch(
+                (0.02 + i * 0.07, 0.03),
+                0.06,
+                0.022,
+                boxstyle='round,pad=0,rounding_size=0.004',
+                transform=ax.transAxes,
+                facecolor=col,
+                edgecolor='none',
+            )
+        )
     ax.text(0.02, 0.075, 'Cargos con pago identificado', transform=ax.transAxes, fontsize=14, color=C['sec'])
     ax.text(0.02, 0.0, '0', transform=ax.transAxes, fontsize=13, color=C['sec'], va='top')
-    ax.text(0.02 + 6 * 0.07 - 0.01, 0.0, str(maximo), transform=ax.transAxes, fontsize=13, color=C['sec'],
-            va='top', ha='right')
+    ax.text(
+        0.02 + 6 * 0.07 - 0.01,
+        0.0,
+        str(maximo),
+        transform=ax.transAxes,
+        fontsize=13,
+        color=C['sec'],
+        va='top',
+        ha='right',
+    )
 
 
 def _hallazgos(desde, hasta, borrador):
-    sql = ("SELECT * FROM hallazgos WHERE estado!='descartado' AND substr(fecha_publicacion,1,10) BETWEEN ? AND ? "
-           "AND pago_smlv IS NOT NULL")
+    sql = (
+        "SELECT * FROM hallazgos WHERE estado!='descartado' AND substr(fecha_publicacion,1,10) BETWEEN ? AND ? "
+        'AND pago_smlv IS NOT NULL'
+    )
     if not borrador:
         sql += " AND estado='confirmado'"
     with db() as conn:
@@ -220,6 +300,7 @@ def _hallazgos(desde, hasta, borrador):
 
 def _pdf(pngs, destino):
     from PIL import Image
+
     imgs = [Image.open(p).convert('RGB') for p in pngs]
     imgs[0].save(destino, save_all=True, append_images=imgs[1:], resolution=100)
     return destino
@@ -229,7 +310,7 @@ def imagenes_dia(fecha, borrador=False, root=None):
     with db() as conn:
         dia = conn.execute('SELECT * FROM dias WHERE fecha=?', (fecha,)).fetchone()
     if not dia:
-        raise ValueError(f'No hay corte para {fecha}: correr app.py --dia {fecha}')
+        raise ValueError(f'No hay corte para {fecha}: correr honorario-justo --dia {fecha}')
     hs = _hallazgos(fecha, fecha, borrador)
     carpeta = indicadores_folder(root) / 'imagenes' / f'dia_{fecha}'
     carpeta.mkdir(parents=True, exist_ok=True)
@@ -240,7 +321,7 @@ def imagenes_dia(fecha, borrador=False, root=None):
         lz = Lienzo(formato, borrador)
         _encabezado(lz, 'Observatorio de Mínima Cuantía', _fecha_larga(d))
         _cifra(lz, str(dia['publicados']), 'procesos de mínima cuantía publicados en SECOP II', grande=True)
-        _cifra(lz, str(dia['con_hallazgo']), f"con cargo y pago mensual identificables ({len(hs)} cargos)")
+        _cifra(lz, str(dia['con_hallazgo']), f'con cargo y pago mensual identificables ({len(hs)} cargos)')
         if hs:
             med = sorted(h['pago_smlv'] for h in hs)[len(hs) // 2]
             _cifra(lz, f'{_smlv(med)} SMLV', 'pago mensual mediano de esos cargos')
@@ -249,9 +330,13 @@ def imagenes_dia(fecha, borrador=False, root=None):
         if hs:
             muestra = hs[:4] + hs[-4:] if len(hs) > 8 else hs
             lz = Lienzo(formato, borrador)
-            _encabezado(lz, _fecha_larga(d), 'Cuánto se paga a cada cargo',
-                        'Pago mensual frente a la experiencia exigida' + (' (los 4 más bajos y los 4 más altos)'
-                                                                           if len(hs) > 8 else ''))
+            _encabezado(
+                lz,
+                _fecha_larga(d),
+                'Cuánto se paga a cada cargo',
+                'Pago mensual frente a la experiencia exigida'
+                + (' (los 4 más bajos y los 4 más altos)' if len(hs) > 8 else ''),
+            )
             alto_disp = lz.H - lz.f['bottom'] - 110 - lz.y
             _barras_smlv(lz, muestra, min(alto_disp, 140 * len(muestra) + 60))
             lz.pie(_fuente(fecha))
@@ -263,11 +348,14 @@ def imagenes_dia(fecha, borrador=False, root=None):
 
 
 def imagenes_semana(fecha, borrador=False, root=None):
-    from indicadores import resumen_semana
+    from honorario_justo.reportes.indicadores import resumen_semana
+
     r = resumen_semana(fecha, solo_confirmados=not borrador)
     lunes, domingo = date.fromisoformat(r['desde']), date.fromisoformat(r['hasta'])
-    rango = f'Del {lunes.day} de {MESES[lunes.month - 1]} al {domingo.day} de {MESES[domingo.month - 1]} de {domingo.year}'
-    carpeta = indicadores_folder(root) / 'imagenes' / f"semana_{r['semana_iso']}"
+    rango = (
+        f'Del {lunes.day} de {MESES[lunes.month - 1]} al {domingo.day} de {MESES[domingo.month - 1]} de {domingo.year}'
+    )
+    carpeta = indicadores_folder(root) / 'imagenes' / f'semana_{r["semana_iso"]}'
     carpeta.mkdir(parents=True, exist_ok=True)
     bajos = r['bajos'] or r['mas_bajos']
     altos = r['destacados'] or r['mas_altos']
@@ -277,9 +365,9 @@ def imagenes_semana(fecha, borrador=False, root=None):
         lz = Lienzo(formato, borrador)
         _encabezado(lz, 'Resumen semanal', rango)
         _cifra(lz, str(r['publicados']), 'procesos de mínima cuantía publicados en SECOP II', grande=True)
-        _cifra(lz, str(r['cargos']), f"cargos con pago mensual identificable en {r['procesos_con_dato']} procesos")
+        _cifra(lz, str(r['cargos']), f'cargos con pago mensual identificable en {r["procesos_con_dato"]} procesos')
         if r['mediana_smlv'] is not None:
-            _cifra(lz, f"{_smlv(r['mediana_smlv'])} SMLV", 'pago mensual mediano')
+            _cifra(lz, f'{_smlv(r["mediana_smlv"])} SMLV', 'pago mensual mediano')
         lz.pie(_fuente(r['hasta']))
         pngs.append(lz.guardar(carpeta / f'{formato}_1_portada.png'))
 
@@ -290,13 +378,25 @@ def imagenes_semana(fecha, borrador=False, root=None):
             lz.pie(_fuente(r['hasta']))
             pngs.append(lz.guardar(carpeta / f'{formato}_2_mapa.png'))
 
-        for n, (titulo, sub, lista) in enumerate([
-            ('Lo que se paga poco',
-             'Cuartil inferior frente a cargos con la misma experiencia exigida' if r['bajos']
-             else 'Los pagos más bajos de la semana', bajos),
-            ('Lo que se paga bien',
-             'Cuartil superior frente a cargos con la misma experiencia exigida' if r['destacados']
-             else 'Los pagos más altos de la semana', altos)], start=3):
+        for n, (titulo, sub, lista) in enumerate(
+            [
+                (
+                    'Lo que se paga poco',
+                    'Cuartil inferior frente a cargos con la misma experiencia exigida'
+                    if r['bajos']
+                    else 'Los pagos más bajos de la semana',
+                    bajos,
+                ),
+                (
+                    'Lo que se paga bien',
+                    'Cuartil superior frente a cargos con la misma experiencia exigida'
+                    if r['destacados']
+                    else 'Los pagos más altos de la semana',
+                    altos,
+                ),
+            ],
+            start=3,
+        ):
             if not lista:
                 continue
             lz = Lienzo(formato, borrador)
@@ -317,7 +417,8 @@ def imagenes_semana(fecha, borrador=False, root=None):
             'antes de impuestos y factor prestacional.',
             '"Paga bien" o "paga poco" se mide contra cargos con la misma franja de experiencia exigida, '
             'no contra un valor fijo.',
-            'Cada cifra fue revisada antes de publicarse.' if not borrador else 'BORRADOR: cifras sin revisar.']:
+            'Cada cifra fue revisada antes de publicarse.' if not borrador else 'BORRADOR: cifras sin revisar.',
+        ]:
             lz.parrafo('• ' + linea, 26, color=C['sec'], espacio_despues=20)
         lz.pie(_fuente(r['hasta']))
         pngs.append(lz.guardar(carpeta / f'{formato}_9_metodo.png'))

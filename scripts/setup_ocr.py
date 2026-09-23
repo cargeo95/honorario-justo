@@ -1,6 +1,8 @@
 """One-time public Spanish OCR model download; OCR itself runs locally."""
-from pathlib import Path
+
 import gzip
+from pathlib import Path
+
 import requests
 
 folder = Path(__file__).resolve().parents[1] / 'data/ocr'
