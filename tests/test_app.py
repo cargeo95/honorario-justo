@@ -322,3 +322,15 @@ def test_analyze_case_aplica_la_regla_por_tipo_de_contrato(application):
     case = base_datos.get_case(cid)
     assert case['analysis']['warnings'] == []
     assert case['analysis']['documents'][0]['paginas_sin_ocr'] == 1
+
+
+def test_fallo_de_red_no_cuenta_como_sin_documentos(application):
+    class ClienteCaido:
+        def documents(self, meta):
+            raise ConnectionError('Max retries exceeded')
+
+    cid = base_datos.record_process({'id_del_proceso': 'RED.1', 'id_del_portafolio': 'X'})
+    with pytest.raises(analisis.ErrorConsulta):
+        analisis.analyze_case(cid, analisis.settings(), ClienteCaido())
+    # El caso no queda como analizado: la siguiente corrida lo reintenta.
+    assert base_datos.get_case(cid)['checked_at'] is None

@@ -7,7 +7,7 @@ import logging
 from honorario_justo import config
 from honorario_justo.almacenamiento.base_datos import db, get_case, get_value, now, record_process, set_value, unpack
 from honorario_justo.fuentes.secop import SecopClient
-from honorario_justo.servicios.analisis import analyze_case, settings, skip_reanalysis
+from honorario_justo.servicios.analisis import ErrorConsulta, analyze_case, settings, skip_reanalysis
 
 
 def cursor_key_for(config):
@@ -43,6 +43,10 @@ def run_cycle():
                 continue
             try:
                 analyze_case(item_id, config, client)
+            except ErrorConsulta as exc:
+                # Fallo de red: el caso queda como estaba y se reintenta en la siguiente corrida.
+                logging.warning('%s: %s', item_id, exc)
+                continue
             except Exception as exc:
                 logging.exception('Process failed: %s', item_id)
                 with db() as conn:

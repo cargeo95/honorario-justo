@@ -15,6 +15,10 @@ from honorario_justo.fuentes.documentos import analyze_pdf, classification, rend
 from honorario_justo.fuentes.secop import doc_score, link
 
 
+class ErrorConsulta(RuntimeError):
+    """No se pudo consultar SECOP (red, API caída): el caso queda pendiente, no analizado."""
+
+
 def settings():
     defaults = {
         'date_from': (date.today() - timedelta(days=90)).isoformat(),
@@ -44,11 +48,13 @@ def analyze_case(case_id, config, client=None):
         config = dict(config, omitir_ocr=True)
     warnings = [] if client else list(case['analysis'].get('warnings', []))
     documents, available = [], case['analysis'].get('inventory', [])
-    try:
-        if client:
+    if client:
+        try:
             available, warnings = client.documents(case['metadata'])
-    except Exception as exc:
-        warnings.append('Consulta de documentos: ' + str(exc))
+        except Exception as exc:
+            # Un fallo de red NO es "sin documentos": el caso no se da por analizado y se
+            # reintenta en la siguiente corrida (21-sep-2026: 14 procesos se perdieron asi).
+            raise ErrorConsulta(f'Consulta de documentos: {exc}') from exc
     eligible = sorted([r for r in available if doc_score(r) > 0], key=doc_score, reverse=True)
     if len(eligible) > config['max_documents']:
         warnings.append(f'Se priorizaron {config["max_documents"]} de {len(eligible)} PDF candidatos')

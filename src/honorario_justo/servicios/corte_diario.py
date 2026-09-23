@@ -10,7 +10,7 @@ from datetime import date, timedelta
 
 from honorario_justo.almacenamiento.base_datos import db, get_case, now, record_process, respaldar_db, resumen_dia
 from honorario_justo.fuentes.secop import SecopClient
-from honorario_justo.servicios.analisis import analyze_case, settings, skip_reanalysis
+from honorario_justo.servicios.analisis import ErrorConsulta, analyze_case, settings, skip_reanalysis
 from honorario_justo.servicios.aprendizaje import generar_aprendizaje
 from honorario_justo.servicios.hallazgos import extraer_caso, guardar_hallazgos_caso
 
@@ -48,6 +48,10 @@ def run_day(fecha, limite=None, use_ollama=True):
                     logging.warning('[%s] %s: %s', fecha, case_id, w)
                 con_alertas += bool(case['analysis'].get('warnings'))
             guardar_hallazgos_caso(case, extraer_caso(case, use_ollama))
+        except ErrorConsulta as exc:
+            # Queda sin analizar: el dia no se da por completo y la siguiente corrida lo reintenta.
+            logging.warning('[%s] %s pendiente: %s', fecha, case_id, exc)
+            fallidos.append(case_id)
         except Exception:
             logging.exception('[%s] Fallo el proceso %s', fecha, case_id)
             fallidos.append(case_id)
