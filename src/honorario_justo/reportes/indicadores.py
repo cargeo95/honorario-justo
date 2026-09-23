@@ -252,7 +252,8 @@ def escribir_resumen_dia(fila, root=None):
         if r['anos_experiencia'] is None:
             anos = 'años sin dato'
         else:
-            anos = f'{r["anos_experiencia"]} años' + ('' if r['anos_nivel'] == 'cargo' else ' (máx. del proceso)')
+            n = r['anos_experiencia']
+            anos = f'{n} {"año" if n == 1 else "años"}' + ('' if r['anos_nivel'] == 'cargo' else ' (máx. del proceso)')
         smlv = f'{r["pago_smlv"]:.2f} SMLV'.replace('.', ',') if r['pago_smlv'] is not None else 'SMLV sin dato'
         lineas.append(
             f'- #{r["id"]} {r["cargo"]} - {anos} - ${pesos(r["pago_mensual_cop"])}/mes ({smlv}) - '

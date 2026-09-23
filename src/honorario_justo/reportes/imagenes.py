@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager  # noqa: E402
 from matplotlib.patches import FancyBboxPatch, Polygon  # noqa: E402
 
+from honorario_justo import config  # noqa: E402
 from honorario_justo.almacenamiento.base_datos import db  # noqa: E402
 from honorario_justo.config import indicadores_folder  # noqa: E402
 from honorario_justo.dominio.extraccion import SMLV, SMLV_FUENTE  # noqa: E402
@@ -30,17 +31,18 @@ FORMATOS = {
     'linkedin': {'w': 1080, 'h': 1350, 'top': 80, 'bottom': 80, 'left': 80, 'right': 80},
     'tiktok': {'w': 1080, 'h': 1920, 'top': 200, 'bottom': 460, 'left': 80, 'right': 170},
 }
-# Paleta clara del tablero (validada con el script de dataviz: slots 1-3 pasan CVD).
+# Paleta de marca WeDoEngineer: morado #a738ea para la serie y escala secuencial en morados.
 C = {
     'fondo': '#fcfcfb',
     'tinta': '#0b0b0b',
     'sec': '#52514e',
     'tenue': '#7a7974',
     'grid': '#e6e5e0',
-    'serie': '#2a78d6',
+    'serie': '#a738ea',
     'borrador': '#fff4d6',
-    'seq': ['#f0efec', '#cde2fb', '#9ec5f4', '#5598e7', '#256abf', '#104281'],
+    'seq': ['#f0efec', '#eadcf9', '#d3b1f4', '#bb85ef', '#a738ea', '#6b1d9e'],
 }
+LOGO = config.ROOT / 'docs' / 'assets' / 'wedoengineer-light.png'
 DIAS_SEMANA = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
 
 for _f in ('segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf'):
@@ -136,7 +138,20 @@ class Lienzo:
             self.texto(self.x0, y, linea, 18, color=C['tenue'])
             y += 22
 
+    def firma(self, ancho=140):
+        """Logo de WeDoEngineer arriba a la derecha, dentro de la zona segura."""
+        if not LOGO.exists():
+            return
+        from PIL import Image
+
+        logo = Image.open(LOGO).convert('RGBA')
+        alto = round(logo.height * ancho / logo.width)
+        logo = logo.resize((ancho, alto), Image.LANCZOS)
+        # figimage cuenta desde abajo; el logo queda alineado con la etiqueta superior.
+        self.fig.figimage(logo, xo=self.x1 - ancho, yo=self.H - self.f['top'] - alto + 18, zorder=10)
+
     def guardar(self, path):
+        self.firma()
         self.fig.savefig(path, dpi=100, facecolor=C['fondo'])
         plt.close(self.fig)
         return path
@@ -165,7 +180,7 @@ def _fuente(fecha_ref):
         f'SMLV {anio}: ${pesos(smlv)} ({SMLV_FUENTE.get(anio, "")}). Valores antes de impuestos y factor prestacional.'
         if smlv
         else 'SMLV del año de publicación.',
-        'Observatorio de Mínima Cuantía',
+        'Honorario Justo',
     ]
 
 
@@ -197,7 +212,10 @@ def _barras_smlv(lz, hallazgos, alto):
             zorder=5,
             bbox=tapa,
         )
-        anos = f'{h["anos_experiencia"]} años exigidos' if h['anos_nivel'] == 'cargo' else 'años sin cruzar'
+        n = h['anos_experiencia']
+        anos = (
+            f'{n} {"año exigido" if n == 1 else "años exigidos"}' if h['anos_nivel'] == 'cargo' else 'años sin cruzar'
+        )
         cargo = textwrap.shorten(h['cargo'].capitalize(), 48, placeholder='…')
         ax.text(0, y + 0.2, cargo, va='bottom', fontsize=17, color=C['tinta'], zorder=5, bbox=tapa)
         ax.text(
@@ -319,7 +337,7 @@ def imagenes_dia(fecha, borrador=False, root=None):
     for formato in FORMATOS:
         pngs = []
         lz = Lienzo(formato, borrador)
-        _encabezado(lz, 'Observatorio de Mínima Cuantía', _fecha_larga(d))
+        _encabezado(lz, 'Honorario Justo', _fecha_larga(d))
         _cifra(lz, str(dia['publicados']), 'procesos de mínima cuantía publicados en SECOP II', grande=True)
         _cifra(lz, str(dia['con_hallazgo']), f'con cargo y pago mensual identificables ({len(hs)} cargos)')
         if hs:
@@ -337,7 +355,7 @@ def imagenes_dia(fecha, borrador=False, root=None):
                 'Pago mensual frente a la experiencia exigida'
                 + (' (los 4 más bajos y los 4 más altos)' if len(hs) > 8 else ''),
             )
-            alto_disp = lz.H - lz.f['bottom'] - 110 - lz.y
+            alto_disp = lz.H - lz.f['bottom'] - 150 - lz.y
             _barras_smlv(lz, muestra, min(alto_disp, 140 * len(muestra) + 60))
             lz.pie(_fuente(fecha))
             pngs.append(lz.guardar(carpeta / f'{formato}_2_cargos.png'))
@@ -402,7 +420,7 @@ def imagenes_semana(fecha, borrador=False, root=None):
             lz = Lienzo(formato, borrador)
             _encabezado(lz, rango, titulo, sub)
             muestra = sorted(lista[:5], key=lambda h: h['pago_smlv'])
-            alto_disp = lz.H - lz.f['bottom'] - 110 - lz.y
+            alto_disp = lz.H - lz.f['bottom'] - 150 - lz.y
             _barras_smlv(lz, muestra, min(alto_disp, 150 * len(muestra) + 60))
             lz.pie(_fuente(r['hasta']))
             pngs.append(lz.guardar(carpeta / f'{formato}_{n}_{"bajos" if n == 3 else "altos"}.png'))
