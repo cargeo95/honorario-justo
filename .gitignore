@@ -1,0 +1,13 @@
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+*.log
+qa-output/
+respaldo_migracion/
+Resultados/
+Indicadores/
+logs/
+idea.md
+CLAUDE.md
+REDACCION.md
