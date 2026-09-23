@@ -157,6 +157,10 @@ Cada reporte muestra:
 
 El reporte solo sugiere reglas desde 30 revisiones, y un grupo necesita al menos 20 procesos. Las sugerencias no se aplican solas: la regla se decide al leer el reporte y se programa aparte. En muchos procesos Datos Abiertos trae el código UNSPSC como `UNSPECIFIED`, así que el tipo de contrato es la dimensión más confiable.
 
+**Reglas aplicadas** (en `src/honorario_justo/dominio/reglas.py`, cada una con su evidencia):
+
+- *23-sep-2026:* no se hace OCR a suministros, compraventa, seguros ni obra. En 68 procesos de esos tipos se gastaron 2.202 páginas de OCR y no apareció ninguna cifra de pago por cargo. Su texto digital se sigue leyendo y el proceso cuenta en el embudo del día.
+
 Cómo se obtiene cada cifra:
 
 - **Pago por cargo:** hay tres métodos, en este orden. Primero la tabla del PDF con `pdfplumber`, que da confianza alta. Si no la encuentra, busca con regex en el texto: confianza media en PDF digital y baja en OCR, donde además exige que el cargo esté a ±1 línea del monto. El último recurso es Ollama local (`gemma3:4b`), que da confianza baja y solo cuenta si el cargo es un rol real y el pago es plausible. Un pago mayor a 15 SMLV baja a confianza baja.

@@ -21,14 +21,16 @@ def run_day(fecha, limite=None, use_ollama=True):
     analizado en las ultimas 24 h no se repite. Puede tardar horas (~150-250 procesos)."""
     config = dict(settings(), keywords='', date_from=fecha, date_to=fecha, department='')
     client = SecopClient()
-    publicados = client.count_processes(config)
+    # Datos Abiertos a veces repite la fila de un proceso (18-sep-2026: 118 filas, 117 procesos).
+    # Se cuentan procesos únicos; si no, el día nunca queda completo y se reprocesa en cada corrida.
+    procesos = list({p['id_del_proceso']: p for p in client.all_processes(config)}.values())
+    publicados = len(procesos)
     with db() as conn:
         conn.execute(
             'INSERT INTO dias(fecha,publicados,updated_at) VALUES (?,?,?) ON CONFLICT(fecha) '
             'DO UPDATE SET publicados=excluded.publicados,updated_at=excluded.updated_at',
             (fecha, publicados, now()),
         )
-    procesos = client.all_processes(config)
     procesos = procesos[:limite] if limite else procesos
     logging.info('Dia %s: %d publicados, %d a procesar', fecha, publicados, len(procesos))
     fallidos, con_alertas = [], 0

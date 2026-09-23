@@ -291,3 +291,34 @@ def test_skip_reanalysis_retries_cases_with_new_candidate_documents(application)
         },
     )
     assert analisis.skip_reanalysis(fallo_descarga) is True
+
+
+def test_regla_omite_ocr_en_tipos_sin_personal_sin_alertas(tmp_path):
+    from honorario_justo.dominio.reglas import omitir_ocr
+
+    assert omitir_ocr({'tipo_de_contrato': 'Suministros'})
+    assert omitir_ocr({'tipo_de_contrato': 'Compraventa'})
+    assert not omitir_ocr({'tipo_de_contrato': 'Prestación de servicios'})
+    assert not omitir_ocr({'tipo_de_contrato': 'Consultoría'})
+    assert not omitir_ocr({})
+    # Pagina escaneada (sin texto): con la regla no se hace OCR ni se marca como lectura cortada.
+    path = tmp_path / 'escaneado.pdf'
+    with fitz.open() as doc:
+        doc.new_page()
+        doc.save(path)
+    sin_ocr = analyze_pdf(path, tmp_path, {'max_pages': 10, 'max_ocr_pages': 0, 'omitir_ocr': True})
+    assert sin_ocr['warnings'] == [] and sin_ocr['complete'] and sin_ocr['paginas_sin_ocr'] == 1
+    # Si la regla deja de aplicar, ese texto en cache no se reutiliza: se intenta leer de nuevo.
+    con_ocr = analyze_pdf(path, tmp_path, {'max_pages': 10, 'max_ocr_pages': 0})
+    assert con_ocr['warnings'] == ['Pagina 1: limite de OCR alcanzado'] and con_ocr['paginas_sin_ocr'] == 0
+
+
+def test_analyze_case_aplica_la_regla_por_tipo_de_contrato(application):
+    cid = base_datos.record_process({'id_del_proceso': 'SUM.1', 'tipo_de_contrato': 'Suministros'})
+    with fitz.open() as doc:
+        doc.new_page()
+        doc.save(base_datos.case_folder(cid) / 'documents' / 'escaneado.pdf')
+    analisis.analyze_case(cid, analisis.settings())
+    case = base_datos.get_case(cid)
+    assert case['analysis']['warnings'] == []
+    assert case['analysis']['documents'][0]['paginas_sin_ocr'] == 1

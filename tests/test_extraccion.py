@@ -116,12 +116,17 @@ def test_run_day_procesa_todo_el_dia_sin_palabra_clave(application, monkeypatch)
     vistos = {}
 
     class FakeClient:
-        def count_processes(self, settings):
-            vistos['keywords'] = settings['keywords']
-            return 2
-
         def all_processes(self, settings):
+            vistos['keywords'] = settings['keywords']
+            # La fila de DIA.1 viene repetida, como pasa en Datos Abiertos.
             return [
+                {
+                    'id_del_proceso': 'DIA.1',
+                    'fecha_de_publicacion_del': '2026-09-18T00:00:00.000',
+                    'departamento_entidad': 'Santander',
+                    'entidad': 'E',
+                }
+            ] + [
                 {
                     'id_del_proceso': f'DIA.{i}',
                     'fecha_de_publicacion_del': '2026-09-18T00:00:00.000',

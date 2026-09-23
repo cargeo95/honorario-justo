@@ -157,12 +157,14 @@ def analyze_pdf(path, folder, config):
     old = {}
     if cached.exists():
         old = json.loads(cached.read_text(encoding='utf-8'))
-        if (old.get('complete') or config.get('cache_only')) and old.get('version') == 1:
+        # Un texto leído sin OCR (por regla) no sirve si ahora sí se quiere OCR.
+        sin_ocr_valido = config.get('omitir_ocr') or not old.get('paginas_sin_ocr')
+        if (old.get('complete') or config.get('cache_only')) and old.get('version') == 1 and sin_ocr_valido:
             # Re-score cached text when rules change without repeating extraction or OCR.
             for page in old['pages']:
                 page['scores'] = scores(page['text'])
             return old
-    pages, warnings, ocr_count = [], [], 0
+    pages, warnings, ocr_count, sin_ocr = [], [], 0, 0
     with fitz.open(path) as doc:
         if doc.needs_pass:
             raise ValueError('PDF protegido con contrasena')
@@ -184,6 +186,9 @@ def analyze_pdf(path, folder, config):
                 )
                 if previous:
                     text, method = previous['text'], 'ocr'
+                elif config.get('omitir_ocr'):
+                    # Regla de dominio (dominio/reglas.py): este tipo de contrato no justifica OCR.
+                    sin_ocr += 1
                 elif ocr_count < config['max_ocr_pages']:
                     try:
                         text = ocr_page(page, folder, i)
@@ -194,7 +199,14 @@ def analyze_pdf(path, folder, config):
                 else:
                     warnings.append(f'Pagina {i + 1}: limite de OCR alcanzado')
             pages.append({'page': i + 1, 'text': text, 'method': method, 'scores': scores(text)})
-    result = {'version': 1, 'sha256': digest, 'pages': pages, 'warnings': warnings, 'complete': not warnings}
+    result = {
+        'version': 1,
+        'sha256': digest,
+        'pages': pages,
+        'warnings': warnings,
+        'complete': not warnings,
+        'paginas_sin_ocr': sin_ocr,
+    }
     cached.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
     return result
 

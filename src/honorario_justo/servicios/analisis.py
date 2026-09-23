@@ -10,6 +10,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from honorario_justo.almacenamiento.base_datos import case_folder, db, get_case, get_value, now
+from honorario_justo.dominio.reglas import omitir_ocr
 from honorario_justo.fuentes.documentos import analyze_pdf, classification, render_page
 from honorario_justo.fuentes.secop import doc_score, link
 
@@ -39,6 +40,8 @@ def settings():
 def analyze_case(case_id, config, client=None):
     case = get_case(case_id)
     folder = case_folder(case_id)
+    if omitir_ocr(case['metadata']):
+        config = dict(config, omitir_ocr=True)
     warnings = [] if client else list(case['analysis'].get('warnings', []))
     documents, available = [], case['analysis'].get('inventory', [])
     try:
@@ -70,7 +73,14 @@ def analyze_case(case_id, config, client=None):
         try:
             result = analyze_pdf(folder / 'documents' / filename, folder / 'text', config)
             warnings.extend(source['name'] + ': ' + w for w in result['warnings'])
-            documents.append(dict(source, pages=len(result['pages']), sha256=result['sha256']))
+            documents.append(
+                dict(
+                    source,
+                    pages=len(result['pages']),
+                    sha256=result['sha256'],
+                    paginas_sin_ocr=result.get('paginas_sin_ocr', 0),
+                )
+            )
             for page in result['pages']:
                 for kind, score in page['scores'].items():
                     if score:
