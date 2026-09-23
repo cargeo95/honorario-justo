@@ -296,3 +296,29 @@ def test_tabla_de_personal_con_encabezado_lejano_tipo_guadalupe(monkeypatch):
     pagos = sorted(i['pago_mensual_cop'] for i in extraccion.extract_pay_regex('X', 'x.pdf', 15))
     assert pagos == [1_750_000, 1_750_000, 2_200_000, 2_300_000, 3_450_000]  # base, no el valor con FM ni el subtotal
     assert scores(GUADALUPE_P15)['presupuesto'] > 0
+
+
+def test_experiencia_en_meses_y_formato():
+    from honorario_justo.dominio.formato import experiencia
+
+    # Putumayo, 18-sep-2026: requisito en meses.
+    texto = 'Coordinador del proyecto. Experiencia profesional minima de doce (12) meses en coordinacion.'
+    assert parse_requisitos_texto(texto) == [{'cargo': 'coordinador del proyecto', 'anos': 1}]
+    assert parse_requisitos_texto('Psicologo con seis (6) meses de experiencia')[0]['anos'] == 0.5
+    # Guapota: la experiencia general va primero; la especifica (3 anos) no la reemplaza.
+    guapota = (
+        'Director de Interventoria. No menor de diez (10) anos contados desde la matricula. '
+        'Experiencia especifica no menor a tres (03) anos.'
+    )
+    assert parse_requisitos_texto(guapota)[0]['anos'] == 10
+    assert experiencia(1) == '1 año' and experiencia(10) == '10 años'
+    assert experiencia(0.5) == '6 meses' and experiencia(None) == 'sin dato'
+
+
+def test_sin_cruce_de_requisitos_la_experiencia_queda_sin_dato(application, monkeypatch):
+    # Antes se rellenaba con el maximo de anos de la pagina (Guapota: 3 en vez de 10 y 5).
+    from honorario_justo.servicios import hallazgos as srv
+
+    monkeypatch.setattr(srv, 'extract_requirements', lambda *a: [])
+    items = srv.extraer_caso(_caso_con_pdf(), use_ollama=False)
+    assert items and all(i['anos_experiencia'] is None and i['anos_nivel'] is None for i in items)

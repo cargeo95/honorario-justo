@@ -25,7 +25,7 @@ from honorario_justo import config  # noqa: E402
 from honorario_justo.almacenamiento.base_datos import db  # noqa: E402
 from honorario_justo.config import indicadores_folder  # noqa: E402
 from honorario_justo.dominio.extraccion import SMLV, SMLV_FUENTE  # noqa: E402
-from honorario_justo.dominio.formato import MESES, pesos  # noqa: E402
+from honorario_justo.dominio.formato import MESES, experiencia, pesos  # noqa: E402
 
 FORMATOS = {
     'linkedin': {'w': 1080, 'h': 1350, 'top': 80, 'bottom': 80, 'left': 80, 'right': 80},
@@ -212,10 +212,7 @@ def _barras_smlv(lz, hallazgos, alto):
             zorder=5,
             bbox=tapa,
         )
-        n = h['anos_experiencia']
-        anos = (
-            f'{n} {"año exigido" if n == 1 else "años exigidos"}' if h['anos_nivel'] == 'cargo' else 'años sin cruzar'
-        )
+        anos = f'{experiencia(h["anos_experiencia"])} de experiencia'
         cargo = textwrap.shorten(h['cargo'].capitalize(), 48, placeholder='…')
         ax.text(0, y + 0.2, cargo, va='bottom', fontsize=17, color=C['tinta'], zorder=5, bbox=tapa)
         ax.text(

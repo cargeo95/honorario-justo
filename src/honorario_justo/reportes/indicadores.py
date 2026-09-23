@@ -19,7 +19,7 @@ from statistics import median, quantiles
 from honorario_justo import config
 from honorario_justo.almacenamiento.base_datos import HALLAZGO_COLS, db
 from honorario_justo.config import indicadores_folder
-from honorario_justo.dominio.formato import MESES, pesos
+from honorario_justo.dominio.formato import MESES, experiencia, pesos
 
 FRANJAS = [(0, 4, '0-4 años'), (5, 9, '5-9 años'), (10, 14, '10-14 años'), (15, 99, '15 o más años')]
 MIN_COMPARABLES = 8
@@ -249,11 +249,7 @@ def escribir_resumen_dia(fila, root=None):
         '',
     ]
     for r in filas:
-        if r['anos_experiencia'] is None:
-            anos = 'años sin dato'
-        else:
-            n = r['anos_experiencia']
-            anos = f'{n} {"año" if n == 1 else "años"}' + ('' if r['anos_nivel'] == 'cargo' else ' (máx. del proceso)')
+        anos = 'experiencia ' + experiencia(r['anos_experiencia'])
         smlv = f'{r["pago_smlv"]:.2f} SMLV'.replace('.', ',') if r['pago_smlv'] is not None else 'SMLV sin dato'
         lineas.append(
             f'- #{r["id"]} {r["cargo"]} - {anos} - ${pesos(r["pago_mensual_cop"])}/mes ({smlv}) - '

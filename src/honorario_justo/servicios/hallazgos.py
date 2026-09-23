@@ -11,7 +11,6 @@ from honorario_justo.dominio import aprendizaje
 from honorario_justo.dominio.extraccion import (
     confianza,
     en_smlv,
-    extract_experience_years,
     extract_pay,
     extract_requirements,
     match_requirement,
@@ -32,13 +31,13 @@ def _unicas(alternatives):
 def extraer_caso(case, use_ollama=True):
     """Hallazgos (cargo + pago mensual) de un caso ya analizado, con los anos exigidos
     para ESE cargo cuando se pueden cruzar con la tabla de requisitos (anos_nivel='cargo').
-    Si no se puede cruzar, queda el maximo del caso con anos_nivel='caso': sirve de
-    contexto pero el tablero no lo usa para la brecha por perfil."""
+    Si no se pueden cruzar, quedan sin dato: antes se rellenaba con el maximo de anos de la
+    pagina y eso mostraba cifras falsas (Putumayo 5 anos en vez de 12 meses; Guapota 3 en
+    vez de 10 y 5, 18-sep-2026). Mejor vacio que inventado: lo completa la revision."""
     alternatives = case['analysis'].get('alternatives', {})
-    requisitos, anos_caso = [], []
+    requisitos = []
     for alt in _unicas(alternatives.get('experiencia', [])):
         requisitos.extend(extract_requirements(case['id'], alt['file'], alt['page']))
-        anos_caso.extend(extract_experience_years(case['id'], alt['file'], alt['page']))
     fecha = case['metadata'].get('fecha_de_publicacion_del', '')
     tarifa = referencia_tarifa(case['id'])
     por_clave = {}
@@ -58,8 +57,8 @@ def extraer_caso(case, use_ollama=True):
                 item,
                 archivo_fuente=alt['file'],
                 pagina_fuente=alt['page'],
-                anos_experiencia=anos if anos is not None else (max(anos_caso) if anos_caso else None),
-                anos_nivel='cargo' if anos is not None else ('caso' if anos_caso else None),
+                anos_experiencia=anos,
+                anos_nivel='cargo' if anos is not None else None,
                 pago_smlv=en_smlv(item['pago_mensual_cop'], fecha),
                 referencia_tarifa=tarifa,
             )

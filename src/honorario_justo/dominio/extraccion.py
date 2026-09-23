@@ -14,16 +14,25 @@ import urllib.request
 import pdfplumber
 
 from honorario_justo import config
-from honorario_justo.dominio.texto import ROLE, normal
+from honorario_justo.dominio.texto import CARGOS, ROLE, normal
 
-EXPERIENCE = re.compile(r'\((\d{1,2})\)\s*(anos|ano|meses|mes)\b')
-# "diez (10) anos" o "minimo 3 anos": el numero entre parentesis es el que manda.
-YEARS_ANY = re.compile(r'(?:\((\d{1,2})\)|\b(\d{1,2}))\s*anos?\b')
+# "diez (10) anos", "minimo 3 anos" o "doce (12) meses": el numero entre parentesis manda.
+# Los requisitos en meses son comunes en servicios profesionales (Putumayo, 18-sep-2026:
+# "experiencia profesional minima de doce (12) meses"); antes solo se leian anos.
+EXPERIENCIA_ANY = re.compile(r'(?:\((\d{1,3})\)|\b(\d{1,3}))\s*(anos?|mes(?:es)?)\b')
+
+
+def a_anos(m):
+    """Coincidencia de EXPERIENCIA_ANY -> anos (12 meses = 1; 6 meses = 0.5)."""
+    n = int(m.group(1) or m.group(2))
+    anos = n / 12 if m.group(3).startswith('mes') else n
+    return int(anos) if float(anos).is_integer() else round(anos, 1)
+
+
 # Cargo completo: la palabra de rol (ROLE de dominio/texto.py) mas su especialidad,
 # p. ej. "ingeniero residente de interventoria" o "especialista en geotecnia".
 ROLE_LABEL = re.compile(
-    r'\b(?:ingeniero\s+)?(?:director|asesor|ingeniero|profesional|especialista|coordinador|'
-    r'residente|consultor|topografo|geotecnista|disenador|arquitecto)'
+    r'\b(?:ingeniero\s+)?(?:' + '|'.join(CARGOS) + r')'
     r'(?:\s+(?:de|del|en|la|el|y|[a-z]{3,})\b){0,4}'
 )  # \b: "el" no es "el|ectricista"
 ROLE_STOP = {
@@ -254,13 +263,6 @@ def page_window(case_id, filename, page, radius=1):
     return '\n'.join(pages[p] for p in range(page - radius, page + radius + 1) if p in pages)
 
 
-def extract_experience_years(case_id, filename, page):
-    text = page_window(case_id, filename, page)
-    t = normal(text)
-    hits = [int(m.group(1)) for m in EXPERIENCE.finditer(t) if m.group(2).startswith('ano')]
-    return sorted(set(hits), reverse=True)
-
-
 def parse_requisitos_texto(texto):
     """Requisitos por cargo desde texto plano: recorre cargos y anos en orden de
     aparicion y le asigna a cada cargo el PRIMER numero de anos que aparece despues
@@ -268,7 +270,7 @@ def parse_requisitos_texto(texto):
     experiencia general; la especifica viene despues). Cargo sin anos -> no se reporta."""
     t = normal(texto)
     events = [(m.start(), 'rol', m) for m in ROLE_LABEL.finditer(t)]
-    events += [(m.start(), 'anos', m) for m in YEARS_ANY.finditer(t)]
+    events += [(m.start(), 'anos', m) for m in EXPERIENCIA_ANY.finditer(t)]
     events.sort(key=lambda e: e[0])
     requisitos, actual = [], None
     for _, kind, m in events:
@@ -281,8 +283,8 @@ def parse_requisitos_texto(texto):
             actual = {'cargo': label, 'anos': None}
             requisitos.append(actual)
         elif actual is not None and actual['anos'] is None:
-            n = int(m.group(1) or m.group(2))
-            if 1 <= n <= 40:
+            n = a_anos(m)
+            if 0 < n <= 40:
                 actual['anos'] = n
     return [r for r in requisitos if r['anos'] is not None and r['cargo']]
 
@@ -308,9 +310,9 @@ def parse_tabla_requisitos(page):
             if max(col_cargo, col_exp) >= len(row) or not row[col_cargo]:
                 continue
             cargo = role_label(row[col_cargo]) or ''
-            m = YEARS_ANY.search(normal(row[col_exp] or ''))
+            m = EXPERIENCIA_ANY.search(normal(row[col_exp] or ''))
             if cargo and m:
-                requisitos.append({'cargo': cargo, 'anos': int(m.group(1) or m.group(2))})
+                requisitos.append({'cargo': cargo, 'anos': a_anos(m)})
     return requisitos
 
 
@@ -512,7 +514,7 @@ def extract_pay_filas(case_id, filename, page_number):
             (j for j in range(i + 1, min(len(lines), i + 8)) if ROLE.search(lines[j]) or MONEY_BARE.search(lines[j])),
             i + 8,
         )
-        anos = YEARS_ANY.search('\n'.join(lines[inicio:fin]))
+        anos = EXPERIENCIA_ANY.search(normal('\n'.join(lines[inicio:fin])))
         hallazgos.append(
             {
                 'cargo': cargo,
@@ -520,7 +522,7 @@ def extract_pay_filas(case_id, filename, page_number):
                 'dedicacion': '',
                 'duracion': '',
                 'metodo': 'regex_texto',
-                'anos_fila': int(anos.group(1) or anos.group(2)) if anos else None,
+                'anos_fila': a_anos(anos) if anos else None,
             }
         )
     return hallazgos
