@@ -13,7 +13,9 @@ CARGOS = (
     'facilitador', 'docente', 'sociologo', 'abogado', 'contador', 'administrador', 'economista',
     'tecnologo', 'tecnico', 'auxiliar',
 )  # fmt: skip
-ROLE = re.compile(r'\b(' + '|'.join(CARGOS) + r')\b')
+# Acepta plural y femenino: "profesionales en psicología", "psicóloga", "coordinadora".
+PLURAL = r'(?:a|as|es|s)?'
+ROLE = re.compile(r'\b(' + '|'.join(CARGOS) + r')' + PLURAL + r'\b')
 
 
 def normal(text):

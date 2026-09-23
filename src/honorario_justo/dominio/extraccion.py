@@ -14,7 +14,8 @@ import urllib.request
 import pdfplumber
 
 from honorario_justo import config
-from honorario_justo.dominio.texto import CARGOS, ROLE, normal
+from honorario_justo.dominio.formacion import nivel_formacion
+from honorario_justo.dominio.texto import CARGOS, PLURAL, ROLE, normal
 
 # "diez (10) anos", "minimo 3 anos" o "doce (12) meses": el numero entre parentesis manda.
 # Los requisitos en meses son comunes en servicios profesionales (Putumayo, 18-sep-2026:
@@ -32,8 +33,7 @@ def a_anos(m):
 # Cargo completo: la palabra de rol (ROLE de dominio/texto.py) mas su especialidad,
 # p. ej. "ingeniero residente de interventoria" o "especialista en geotecnia".
 ROLE_LABEL = re.compile(
-    r'\b(?:ingeniero\s+)?(?:' + '|'.join(CARGOS) + r')'
-    r'(?:\s+(?:de|del|en|la|el|y|[a-z]{3,})\b){0,4}'
+    r'\b(?:ingeniero\s+)?(?:' + '|'.join(CARGOS) + r')' + PLURAL + r'(?:\s+(?:de|del|en|la|el|y|[a-z]{3,})\b){0,4}'
 )  # \b: "el" no es "el|ectricista"
 ROLE_STOP = {
     'con',
@@ -267,7 +267,8 @@ def parse_requisitos_texto(texto):
     """Requisitos por cargo desde texto plano: recorre cargos y anos en orden de
     aparicion y le asigna a cada cargo el PRIMER numero de anos que aparece despues
     de el y antes del siguiente cargo (en los estudios previos ese primero es la
-    experiencia general; la especifica viene despues). Cargo sin anos -> no se reporta."""
+    experiencia general; la especifica viene despues). La formacion sale del texto entre
+    ese cargo y el siguiente (hasta 600 caracteres). Cargo sin anos ni formacion -> no se reporta."""
     t = normal(texto)
     events = [(m.start(), 'rol', m) for m in ROLE_LABEL.finditer(t)]
     events += [(m.start(), 'anos', m) for m in EXPERIENCIA_ANY.finditer(t)]
@@ -280,13 +281,23 @@ def parse_requisitos_texto(texto):
             # ("experiencia profesional general") no abren un cargo nuevo.
             if not role_tokens(label) and actual is not None and actual.get('anos') is None:
                 continue
-            actual = {'cargo': label, 'anos': None}
+            # "Coordinador: Profesional en Psicologia con especializacion": un cargo que aparece
+            # justo despues de otro sin anos todavia es su formacion, no un cargo nuevo.
+            if actual is not None and actual.get('anos') is None and m.start() - actual['_fin'] <= 40:
+                continue
+            actual = {'cargo': label, 'anos': None, '_inicio': m.start(), '_fin': m.end()}
             requisitos.append(actual)
         elif actual is not None and actual['anos'] is None:
             n = a_anos(m)
             if 0 < n <= 40:
                 actual['anos'] = n
-    return [r for r in requisitos if r['anos'] is not None and r['cargo']]
+    # Formacion: texto despues del nombre del cargo y antes del siguiente (maximo 600 caracteres).
+    for i, r in enumerate(requisitos):
+        siguiente = requisitos[i + 1]['_inicio'] if i + 1 < len(requisitos) else len(t)
+        r['formacion'] = nivel_formacion(t[r['_fin'] : min(siguiente, r['_fin'] + 600)])
+    for r in requisitos:
+        del r['_inicio'], r['_fin']
+    return [r for r in requisitos if r['cargo'] and (r['anos'] is not None or r['formacion'])]
 
 
 def parse_tabla_requisitos(page):
@@ -306,13 +317,16 @@ def parse_tabla_requisitos(page):
             col_exp = _find_column(labels, ('perfil', 'formacion', 'requisito'))
         if col_cargo is None or col_exp is None or col_cargo == col_exp:
             continue
+        col_form = _find_column(labels, ('formacion', 'profesion', 'titulo', 'estudios', 'perfil'))
         for row in table[1:]:
             if max(col_cargo, col_exp) >= len(row) or not row[col_cargo]:
                 continue
             cargo = role_label(row[col_cargo]) or ''
             m = EXPERIENCIA_ANY.search(normal(row[col_exp] or ''))
-            if cargo and m:
-                requisitos.append({'cargo': cargo, 'anos': a_anos(m)})
+            celda_form = row[col_form] if col_form is not None and col_form < len(row) else ''
+            formacion = nivel_formacion(celda_form or ' '.join(c or '' for c in row))
+            if cargo and (m or formacion):
+                requisitos.append({'cargo': cargo, 'anos': a_anos(m) if m else None, 'formacion': formacion})
     return requisitos
 
 
@@ -335,18 +349,18 @@ def extract_requirements(case_id, filename, page_number):
     return [dict(r, metodo='texto') for r in parse_requisitos_texto(text)]
 
 
-def match_requirement(cargo, requisitos):
-    """Anos exigidos para ESE cargo: el requisito que comparte mas palabras
-    distintivas (director, residente, interventoria, geotecnia...). Empate entre
-    requisitos con anos distintos -> None: mejor sin dato que con el de otro perfil."""
+def match_requirement(cargo, requisitos, campo='anos'):
+    """Dato exigido para ESE cargo (anos o formacion): el requisito que comparte mas
+    palabras distintivas (director, residente, interventoria, geotecnia...). Empate entre
+    requisitos con valores distintos -> None: mejor sin dato que con el de otro perfil."""
     tokens = role_tokens(cargo)
     if not tokens:
         return None
-    scored = [(len(tokens & role_tokens(r['cargo'])), r) for r in requisitos]
+    scored = [(len(tokens & role_tokens(r['cargo'])), r) for r in requisitos if r.get(campo) is not None]
     best = max((s for s, _ in scored), default=0)
     if best == 0:
         return None
-    ganadores = {r['anos'] for s, r in scored if s == best}
+    ganadores = {r[campo] for s, r in scored if s == best}
     return ganadores.pop() if len(ganadores) == 1 else None
 
 
@@ -460,6 +474,22 @@ def extract_pay_regex(case_id, filename, page_number):
             # filas del medio queda lejos (Guadalupe: electricista y arquitecto a 4-5 lineas).
             # Se busca hasta 12 lineas arriba; el cargo si debe estar pegado al monto.
             window = '\n'.join(lines[max(0, i - 12) : i + radius + 1])
+            # Parrafo con rotulo: "Coordinador: Profesional especializado con doce (12) meses ...
+            # por valor de $4.189.500 mensuales" (Putumayo, 18-sep-2026). El cargo es el rotulo,
+            # no la palabra "profesional" pegada al monto, y el parrafo trae formacion y experiencia.
+            extra = {}
+            inicio = None
+            for j in range(i, max(-1, i - 5), -1):
+                if j < i and MONEY_INLINE.search(lines[j]):
+                    break  # no cruzar el monto del cargo anterior
+                if _rotulo_cargo(lines[j]):
+                    inicio = j
+                    break
+            if inicio is not None:
+                cargo = role_label(_rotulo_cargo(lines[inicio])) or cargo
+                parrafo = '\n'.join(lines[inicio : i + 1])
+                anos = EXPERIENCIA_ANY.search(parrafo)
+                extra = {'anos_fila': a_anos(anos) if anos else None, 'formacion_fila': nivel_formacion(parrafo)}
             if cargo and MONTHLY_HINT.search(window):
                 valor = parse_money_co(m.group(1))
                 if pago_plausible(valor):
@@ -470,9 +500,19 @@ def extract_pay_regex(case_id, filename, page_number):
                             'dedicacion': '',
                             'duracion': '',
                             'metodo': 'regex_texto',
+                            **extra,
                         }
                     )
     return hallazgos
+
+
+_ROTULO = re.compile(r'^\s*([a-z][a-z ]{2,60}?)\s*:')
+
+
+def _rotulo_cargo(linea):
+    """'Coordinador: ...' -> 'coordinador'; None si la linea no empieza con un cargo y dos puntos."""
+    m = _ROTULO.match(linea)
+    return m.group(1) if m and ROLE.search(m.group(1)) else None
 
 
 MONEY_BARE = re.compile(r'(?<![\d.,])\d{1,3}(?:\.\d{3}){2,}(?:,\d{2})?(?![\d.,])')
@@ -523,6 +563,7 @@ def extract_pay_filas(case_id, filename, page_number):
                 'duracion': '',
                 'metodo': 'regex_texto',
                 'anos_fila': a_anos(anos) if anos else None,
+                'formacion_fila': nivel_formacion('\n'.join(lines[inicio:fin])),
             }
         )
     return hallazgos

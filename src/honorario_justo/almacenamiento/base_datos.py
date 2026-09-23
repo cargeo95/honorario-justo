@@ -64,6 +64,7 @@ def init_db(path):
             ('confianza', 'TEXT'),
             ('metodo_pagina', 'TEXT'),
             ('referencia_tarifa', 'TEXT'),
+            ('formacion', 'TEXT'),
         ]:
             if col not in existentes:
                 conn.execute(f'ALTER TABLE hallazgos ADD COLUMN {col} {tipo}')
@@ -122,6 +123,7 @@ HALLAZGO_COLS = [
     'cargo',
     'anos_experiencia',
     'anos_nivel',
+    'formacion',
     'pago_mensual_cop',
     'pago_smlv',
     'dedicacion',

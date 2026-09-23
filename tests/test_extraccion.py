@@ -303,7 +303,7 @@ def test_experiencia_en_meses_y_formato():
 
     # Putumayo, 18-sep-2026: requisito en meses.
     texto = 'Coordinador del proyecto. Experiencia profesional minima de doce (12) meses en coordinacion.'
-    assert parse_requisitos_texto(texto) == [{'cargo': 'coordinador del proyecto', 'anos': 1}]
+    assert parse_requisitos_texto(texto) == [{'cargo': 'coordinador del proyecto', 'anos': 1, 'formacion': None}]
     assert parse_requisitos_texto('Psicologo con seis (6) meses de experiencia')[0]['anos'] == 0.5
     # Guapota: la experiencia general va primero; la especifica (3 anos) no la reemplaza.
     guapota = (
@@ -322,3 +322,34 @@ def test_sin_cruce_de_requisitos_la_experiencia_queda_sin_dato(application, monk
     monkeypatch.setattr(srv, 'extract_requirements', lambda *a: [])
     items = srv.extraer_caso(_caso_con_pdf(), use_ollama=False)
     assert items and all(i['anos_experiencia'] is None and i['anos_nivel'] is None for i in items)
+
+
+def test_nivel_de_formacion():
+    from honorario_justo.dominio.formacion import nivel_formacion
+
+    # Casos reales del 18-sep-2026.
+    assert nivel_formacion('Profesional en Psicologia con especializacion, con tarjeta') == 'Pregrado + posgrado'
+    assert nivel_formacion('Medico especialista en Psiquiatria, con tarjeta profesional') == 'Pregrado + posgrado'
+    assert nivel_formacion('Profesional especializado + 12 meses de experiencia') == 'Pregrado + posgrado'
+    assert nivel_formacion('Profesional en Psicologia, con tarjeta profesional vigente') == 'Pregrado'
+    assert nivel_formacion('Ingeniero Civil y/o Ingeniero Sanitario') == 'Pregrado'
+    assert nivel_formacion('Tecnologo en logistica + 12 meses de experiencia minima') == 'Tecnologo'.replace(
+        'o', 'ó', 1
+    )
+    assert nivel_formacion('Tecnico laboral en sistemas') == 'Técnico'
+    # Guapota p.36: forma de acreditar estudios, no requisito de posgrado.
+    assert nivel_formacion('Ingeniero civil. Diploma de pregrado o acta de grado, diploma de postgrado.') == 'Pregrado'
+    assert nivel_formacion('sin datos de estudios') is None
+
+
+def test_requisitos_traen_formacion_por_cargo():
+    texto = (
+        'Coordinador del proyecto: Profesional en Psicologia con especializacion. Experiencia minima de doce (12) meses.\n'
+        'Facilitador psicologo: Profesional en Psicologia. Experiencia minima de doce (12) meses.\n'
+        'Tecnologo logistico: Tecnologo en logistica con doce (12) meses de experiencia.'
+    )
+    req = {r['cargo']: (r['anos'], r['formacion']) for r in parse_requisitos_texto(texto)}
+    assert req['coordinador del proyecto'] == (1, 'Pregrado + posgrado')
+    assert req['facilitador psicologo'] == (1, 'Pregrado')
+    assert req['tecnologo logistico'] == (1, 'Tecnólogo')
+    assert match_requirement('Coordinador', parse_requisitos_texto(texto), 'formacion') == 'Pregrado + posgrado'

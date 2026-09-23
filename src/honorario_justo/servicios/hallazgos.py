@@ -53,11 +53,13 @@ def extraer_caso(case, use_ollama=True):
             anos = item.pop('anos_fila', None)
             if anos is None:
                 anos = match_requirement(item['cargo'], requisitos)
+            formacion = item.pop('formacion_fila', None) or match_requirement(item['cargo'], requisitos, 'formacion')
             item = dict(
                 item,
                 archivo_fuente=alt['file'],
                 pagina_fuente=alt['page'],
                 anos_experiencia=anos,
+                formacion=formacion,
                 anos_nivel='cargo' if anos is not None else None,
                 pago_smlv=en_smlv(item['pago_mensual_cop'], fecha),
                 referencia_tarifa=tarifa,
